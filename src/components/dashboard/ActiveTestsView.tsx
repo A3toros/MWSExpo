@@ -1,6 +1,7 @@
 /** @jsxImportSource nativewind */
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
+import { ThemedButton } from '../ui';
 import { router } from 'expo-router';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses, getCyberpunkClasses } from '../../utils/themeUtils';
@@ -98,45 +99,34 @@ export function ActiveTestsView({
                 // Show loading state while completion status is being determined
                 if (!isCompletionStatusLoaded) {
                   return (
-                    <TouchableOpacity className={themeMode === 'cyberpunk' 
-                      ? 'bg-black border-2 border-gray-400 shadow-lg shadow-gray-400/50 px-4 py-2 rounded-md'
-                      : 'bg-gray-100 border border-gray-300 px-4 py-2 rounded-md'
-                    } disabled>
-                      <Text className={themeMode === 'cyberpunk' 
-                        ? 'text-gray-400 text-sm font-bold tracking-wider'
-                        : 'text-gray-400 text-sm font-semibold'
-                      }>
-                        {themeMode === 'cyberpunk' ? 'LOADING...' : 'Loading...'}
-                      </Text>
-                    </TouchableOpacity>
+                    <ThemedButton
+                      title={themeMode === 'cyberpunk' ? 'LOADING...' : 'Loading...'}
+                      disabled
+                      size="sm"
+                      variant="modal"
+                    />
                   );
                 }
                 
                 // Show completed status
                 if (isCompleted && !test?.retest_available) {
                   return (
-                    <TouchableOpacity className={themeMode === 'cyberpunk' 
-                      ? 'bg-black border-2 border-green-400 shadow-lg shadow-green-400/50 px-4 py-2 rounded-md'
-                      : 'bg-green-100 border border-green-200 px-4 py-2 rounded-md'
-                    } disabled>
-                      <Text className={themeMode === 'cyberpunk' 
-                        ? 'text-green-400 text-sm font-bold tracking-wider'
-                        : 'text-green-800 text-sm font-semibold'
-                      }>
-                        {themeMode === 'cyberpunk' ? '✓ COMPLETED' : '✓ Completed'}
-                      </Text>
-                    </TouchableOpacity>
+                    <ThemedButton
+                      title={themeMode === 'cyberpunk' ? '✓ COMPLETED' : '✓ Completed'}
+                      disabled
+                      size="sm"
+                      variant="modal"
+                    />
                   );
                 }
                 
                 // Show retest button if available
                 if (isCompleted && test?.retest_available) {
                   return (
-                    <TouchableOpacity 
-                      className={themeMode === 'cyberpunk' 
-                        ? 'bg-black border-2 border-yellow-400 shadow-lg shadow-yellow-400/50 px-4 py-2 rounded-md'
-                        : 'bg-blue-500 px-4 py-2 rounded-md'
-                      }
+                    <ThemedButton
+                      title={themeMode === 'cyberpunk' ? 'START RETEST' : 'Start Retest'}
+                      size="sm"
+                      variant="modal"
                       onPress={() => {
                         // Copy web app navigation logic exactly
                         if (test.test_type === 'matching_type') {
@@ -182,24 +172,16 @@ export function ActiveTestsView({
                         // Default navigation for other test types
                         router.push(`/tests/${test.test_type}/${test.test_id}?type=${test.test_type}`);
                       }}
-                    >
-                      <Text className={themeMode === 'cyberpunk' 
-                        ? 'text-yellow-400 text-sm font-bold tracking-wider'
-                        : 'text-white text-sm font-semibold'
-                      }>
-                        {themeMode === 'cyberpunk' ? 'START RETEST' : 'Start Retest'}
-                      </Text>
-                    </TouchableOpacity>
+                    />
                   );
                 }
                 
                 // Show start test button
                 return (
-                  <TouchableOpacity 
-                    className={themeMode === 'cyberpunk' 
-                      ? 'bg-black border-2 border-cyan-400 shadow-lg shadow-cyan-400/50 px-4 py-2 rounded-md'
-                      : 'bg-blue-500 px-4 py-2 rounded-md'
-                    }
+                  <ThemedButton
+                    title={themeMode === 'cyberpunk' ? 'START TEST' : 'Start Test'}
+                    size="sm"
+                    variant="modal"
                     onPress={() => {
                       // Copy web app navigation logic exactly
                       if (test.test_type === 'matching_type') {
@@ -245,14 +227,7 @@ export function ActiveTestsView({
                       // Default navigation for other test types
                       router.push(`/tests/${test.test_type}/${test.test_id}?type=${test.test_type}`);
                     }}
-                  >
-                    <Text className={themeMode === 'cyberpunk' 
-                      ? 'text-cyan-400 text-sm font-bold tracking-wider'
-                      : 'text-white text-sm font-semibold'
-                    }>
-                      {themeMode === 'cyberpunk' ? 'START TEST' : 'Start Test'}
-                    </Text>
-                  </TouchableOpacity>
+                  />
                 );
               })()}
             </View>
@@ -262,23 +237,15 @@ export function ActiveTestsView({
         {/* Show More Button - Copy from web app */}
         {tests.length > 3 && (
           <View className="items-center pt-2">
-            <TouchableOpacity
-              className={themeMode === 'cyberpunk' 
-                ? 'bg-black border-2 border-cyan-400 shadow-lg shadow-cyan-400/50 px-4 py-2 rounded-md'
-                : 'px-4 py-2'
+            <ThemedButton
+              title={themeMode === 'cyberpunk' 
+                ? (showAllTests ? 'SHOW LESS' : `SHOW ${tests.length - 3} MORE`)
+                : (showAllTests ? 'Show Less' : `Show ${tests.length - 3} More`)
               }
+              size="sm"
+              variant="modal"
               onPress={onToggleShowAll}
-            >
-              <Text className={themeMode === 'cyberpunk' 
-                ? 'text-cyan-400 text-sm font-bold tracking-wider'
-                : 'text-blue-600 text-sm font-medium'
-              }>
-                {themeMode === 'cyberpunk' 
-                  ? (showAllTests ? 'SHOW LESS' : `SHOW ${tests.length - 3} MORE`)
-                  : (showAllTests ? 'Show Less' : `Show ${tests.length - 3} More`)
-                }
-              </Text>
-            </TouchableOpacity>
+            />
           </View>
         )}
       </View>

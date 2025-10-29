@@ -16,7 +16,7 @@ import Animated, {
 import { api } from '../../src/services/apiClient';
 import { TestResult } from '../../src/types';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
-import { ActiveTestsView, ResultsView, ProfileView } from '../../src/components/dashboard';
+import { ActiveTestsView, ResultsView, ProfileView, DashboardView } from '../../src/components/dashboard';
 import SettingsView from '../../src/components/dashboard/SettingsView';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppDispatch, useAppSelector } from '../../src/store';
@@ -42,6 +42,7 @@ type User = {
   nickname?: string;
   grade: string;
   class: string;
+  profilePicture?: string;
 };
 
 export default function DashboardScreen() {
@@ -57,6 +58,7 @@ export default function DashboardScreen() {
   const [showAllResults, setShowAllResults] = useState(false);
   const [showAllTests, setShowAllTests] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [completedTests, setCompletedTests] = useState<Set<string>>(new Set());
   const [isCompletionStatusLoaded, setIsCompletionStatusLoaded] = useState(false);
@@ -66,6 +68,7 @@ export default function DashboardScreen() {
   const menuTranslateX = useSharedValue(-Dimensions.get('window').width * 0.6);
   const backdropOpacity = useSharedValue(0);
   const isDragging = useSharedValue(false);
+  const initialTouchX = useSharedValue(0);
 
   const fetchData = useCallback(async () => {
     setError(null);
@@ -145,6 +148,17 @@ export default function DashboardScreen() {
           grade: '',
           class: ''
         };
+      }
+      
+      // Load profile picture from AsyncStorage (same as MenuHeader)
+      try {
+        const savedPicture = await AsyncStorage.getItem('profile_picture');
+        if (savedPicture) {
+          setProfilePicture(savedPicture);
+          console.log('Dashboard: Loaded profile picture from AsyncStorage');
+        }
+      } catch (error) {
+        console.error('Dashboard: Error loading profile picture:', error);
       }
       
       setUser(finalUserData);
@@ -331,6 +345,25 @@ export default function DashboardScreen() {
   const onGestureEvent = (event: any) => {
     'worklet';
     const screenWidth = Dimensions.get('window').width;
+    const leftEdgeThreshold = screenWidth * 0.3; // 30% of screen width
+    
+    // Handle right-to-left swipe to close menu (when menu is open)
+    if (isMenuOpen && initialTouchX.value > leftEdgeThreshold && event.nativeEvent.translationX < -50) {
+      const menuWidth = screenWidth * 0.6;
+      const newTranslateX = Math.max(-menuWidth, Math.min(0, event.nativeEvent.translationX));
+      menuTranslateX.value = newTranslateX;
+      
+      // Update backdrop opacity based on menu position
+      const progress = Math.abs(newTranslateX) / menuWidth;
+      backdropOpacity.value = withTiming(progress * 0.5, { duration: 0 });
+      return;
+    }
+    
+    // Only respond to swipes that started within the left 30% of the screen (for opening menu)
+    if (initialTouchX.value > leftEdgeThreshold) {
+      return;
+    }
+    
     const menuWidth = screenWidth * 0.6;
     const newTranslateX = Math.max(-menuWidth, Math.min(0, event.nativeEvent.translationX));
     menuTranslateX.value = newTranslateX;
@@ -342,8 +375,43 @@ export default function DashboardScreen() {
 
   const onHandlerStateChange = (event: any) => {
     'worklet';
+    if (event.nativeEvent.state === State.BEGAN) {
+      // Capture initial touch position when gesture begins
+      initialTouchX.value = event.nativeEvent.x;
+      runOnJS(console.log)(`🎯 Gesture BEGAN at X: ${event.nativeEvent.x}, threshold: ${Dimensions.get('window').width * 0.3}`);
+    }
+    
     if (event.nativeEvent.state === State.END) {
       const screenWidth = Dimensions.get('window').width;
+      const leftEdgeThreshold = screenWidth * 0.3; // 30% of screen width
+      
+      // Handle right-to-left swipe to close menu (when menu is open)
+      if (isMenuOpen && initialTouchX.value > leftEdgeThreshold) {
+        const velocity = event.nativeEvent.velocityX;
+        const translation = event.nativeEvent.translationX;
+        
+        if (velocity < -500 || translation < -100) {
+          // Close menu with right-to-left swipe
+          const menuWidth = screenWidth * 0.6;
+          menuTranslateX.value = withSpring(-menuWidth, {
+            damping: 20,
+            stiffness: 300,
+          });
+          backdropOpacity.value = withTiming(0, { duration: 300 });
+          runOnJS(setIsMenuOpen)(false);
+          runOnJS(console.log)(`🔄 Menu closed by right-to-left swipe`);
+        }
+        return;
+      }
+      
+      // Only respond to swipes that started within the left 30% of the screen
+      if (initialTouchX.value > leftEdgeThreshold) {
+        runOnJS(console.log)(`🚫 State change ignored - started at ${initialTouchX.value}, beyond threshold ${leftEdgeThreshold}`);
+        return;
+      }
+      
+      runOnJS(console.log)(`✅ State change allowed - started at ${initialTouchX.value}, within threshold ${leftEdgeThreshold}`);
+      
       const menuWidth = screenWidth * 0.6;
       const velocity = event.nativeEvent.velocityX;
       const translation = event.nativeEvent.translationX;
@@ -422,6 +490,30 @@ export default function DashboardScreen() {
         }).length}
       />
 
+      {/* Backdrop for closing menu */}
+      {isMenuOpen && (
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 999,
+            },
+            backdropAnimatedStyle,
+          ]}
+        >
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={1}
+            onPress={closeMenu}
+          />
+        </Animated.View>
+      )}
+
       <PanGestureHandler
         onGestureEvent={onGestureEvent}
         onHandlerStateChange={onHandlerStateChange}
@@ -438,7 +530,7 @@ export default function DashboardScreen() {
             ? 'bg-gray-800' 
             : 'bg-header-blue'
         }`}>
-          <View className="px-4 py-4">
+          <View className="px-4 pt-6 pb-4">
             
             {/* Student Info */}
             <View className="flex-row items-center">
@@ -449,9 +541,9 @@ export default function DashboardScreen() {
                   ? 'bg-white/20' 
                   : 'bg-white'
               }`}>
-                {user?.profilePicture ? (
+                {profilePicture ? (
                   <Image 
-                    source={{ uri: user.profilePicture }} 
+                    source={{ uri: profilePicture }} 
                     className="w-full h-full rounded-full"
                     resizeMode="cover"
                     onError={() => {
@@ -521,6 +613,17 @@ export default function DashboardScreen() {
               <Text className="text-red-800 text-sm">{error}</Text>
             </View>
           ) : null}
+
+          {currentView === 'dashboard' && (
+            <DashboardView
+              results={results}
+              user={user}
+              loading={loading}
+              error={error}
+              onRefresh={onRefresh}
+              refreshing={refreshing}
+            />
+          )}
 
           {currentView === 'active' && (
             <ActiveTestsView

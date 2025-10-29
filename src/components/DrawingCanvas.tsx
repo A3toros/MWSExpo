@@ -64,6 +64,7 @@ export default function DrawingCanvas({
   const [showTextInput, setShowTextInput] = useState(false);
   const [textInputValue, setTextInputValue] = useState('');
   const [textPosition, setTextPosition] = useState({ x: 0, y: 0 });
+  const [isGestureActive, setIsGestureActive] = useState(false);
   
   // Use ref to avoid race conditions with currentPoints
   const currentPointsRef = useRef<any[]>([]);
@@ -145,6 +146,7 @@ export default function DrawingCanvas({
   const startPinch = (focalX: number, focalY: number) => {
     const contentFocus = toLogical(focalX, focalY);
     pinchStartRef.current = { zoom, panX: panOffset.x, panY: panOffset.y, focusX: contentFocus.x, focusY: contentFocus.y };
+    setIsGestureActive(true);
     if (onDrawingStateChange) onDrawingStateChange(true);
     if (onGestureStateChange) onGestureStateChange(true);
   };
@@ -168,6 +170,7 @@ export default function DrawingCanvas({
   };
   const endPinch = () => {
     pinchStartRef.current = null;
+    setIsGestureActive(false);
     if (onDrawingStateChange) onDrawingStateChange(false);
     if (onGestureStateChange) onGestureStateChange(false);
   };
@@ -187,6 +190,7 @@ export default function DrawingCanvas({
 
   const startTwoFingerPan = () => {
     panOriginRef.current = { x: panOffset.x, y: panOffset.y };
+    setIsGestureActive(true);
     if (onDrawingStateChange) onDrawingStateChange(true);
     if (onGestureStateChange) onGestureStateChange(true);
   };
@@ -202,6 +206,7 @@ export default function DrawingCanvas({
     setPanOffset({ x: clampedX, y: clampedY });
   };
   const endTwoFingerPan = () => {
+    setIsGestureActive(false);
     if (onDrawingStateChange) onDrawingStateChange(false);
     if (onGestureStateChange) onGestureStateChange(false);
   };
@@ -224,7 +229,13 @@ export default function DrawingCanvas({
 
   const touchHandler = useTouchHandler({
     onStart: ({ x, y }) => {
-      console.log('DrawingCanvas: Touch start', { x, y, currentTool });
+      console.log('DrawingCanvas: Touch start', { x, y, currentTool, isGestureActive });
+      
+      // CRITICAL: Don't start drawing if gesture is active (pinch/pan)
+      if (isGestureActive) {
+        console.log('DrawingCanvas: Gesture active, ignoring drawing');
+        return; // Let pinch/pan gestures handle this
+      }
       
       // Only process touches within canvas bounds
       if (!isTouchInCanvas(x, y)) {
@@ -283,6 +294,11 @@ export default function DrawingCanvas({
       
     },
     onActive: ({ x, y }) => {
+      // CRITICAL: Don't draw if gesture is active (pinch/pan)
+      if (isGestureActive) {
+        return; // Let pinch/pan gestures handle this
+      }
+      
       // Only process active touches within canvas bounds
       if (!isTouchInCanvas(x, y)) {
         return; // Let parent ScrollView handle this touch
@@ -332,7 +348,13 @@ export default function DrawingCanvas({
       }
     },
     onEnd: () => {
-      console.log('DrawingCanvas: Touch end', { currentTool, currentPointsLength: currentPointsRef.current.length, hasCurrentShape: !!currentShape, pathsCount: paths.length });
+      console.log('DrawingCanvas: Touch end', { currentTool, currentPointsLength: currentPointsRef.current.length, hasCurrentShape: !!currentShape, pathsCount: paths.length, isGestureActive });
+      
+      // CRITICAL: Don't finalize drawing if gesture is active (pinch/pan)
+      if (isGestureActive) {
+        console.log('DrawingCanvas: Gesture active, ignoring drawing finalization');
+        return; // Let pinch/pan gestures handle this
+      }
       
       if (toolAtStartRef.current === 'pan') {
         panStartRef.current = null;

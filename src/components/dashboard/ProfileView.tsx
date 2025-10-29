@@ -1,6 +1,7 @@
 /** @jsxImportSource nativewind */
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Alert, Image, TextInput, ScrollView, ActivityIndicator } from 'react-native';
+import { ThemedButton } from '../ui';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -223,28 +224,20 @@ export function ProfileView({ user, onLogout }: Props) {
           
           {/* Form Actions */}
           <View className="flex-row gap-3">
-            <TouchableOpacity
-              className="flex-1 bg-gray-100 py-3 px-4 rounded-lg border border-gray-300 items-center"
-              onPress={cancelPasswordChange}
-              disabled={isChangingPassword}
-            >
-              <Text className="text-base font-medium text-gray-700">Cancel</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              className="flex-1 bg-blue-500 py-3 px-4 rounded-lg items-center"
-              onPress={handlePasswordSubmit}
-              disabled={isChangingPassword}
-            >
-              {isChangingPassword ? (
-                <View className="flex-row items-center">
-                  <ActivityIndicator size="small" color="white" className="mr-2" />
-                  <Text className="text-base font-medium text-white">Changing...</Text>
-                </View>
-              ) : (
-                <Text className="text-base font-medium text-white">Change Password</Text>
-              )}
-            </TouchableOpacity>
+            <View className="flex-1">
+              <ThemedButton
+                title="Cancel"
+                onPress={cancelPasswordChange}
+                disabled={isChangingPassword}
+              />
+            </View>
+            <View className="flex-1">
+              <ThemedButton
+                title={isChangingPassword ? 'Changing...' : 'Change Password'}
+                onPress={handlePasswordSubmit}
+                disabled={isChangingPassword}
+              />
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -295,50 +288,18 @@ export function ProfileView({ user, onLogout }: Props) {
 
         {/* Action Buttons */}
         <View className="gap-3">
-          <TouchableOpacity
-            className={themeMode === 'cyberpunk' 
-              ? 'bg-black border-2 border-cyan-400 py-3 px-4 rounded-lg items-center'
-              : 'bg-blue-50 py-3 px-4 rounded-lg border border-blue-200 items-center'
-            }
+          <ThemedButton
+            title={themeMode === 'cyberpunk' ? 'UPLOAD PROFILE PICTURE' : 'Upload Profile Picture'}
             onPress={handleImagePicker}
-          >
-            <Text className={themeMode === 'cyberpunk' 
-              ? 'text-cyan-400 font-bold tracking-wider'
-              : 'text-blue-700 font-medium'
-            }>
-              {themeMode === 'cyberpunk' ? 'UPLOAD PROFILE PICTURE' : 'Upload Profile Picture'}
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            className={themeMode === 'cyberpunk' 
-              ? 'bg-black border-2 border-yellow-400 py-3 px-4 rounded-lg items-center'
-              : 'bg-gray-50 py-3 px-4 rounded-lg border border-gray-200 items-center'
-            }
+          />
+          <ThemedButton
+            title={themeMode === 'cyberpunk' ? 'CHANGE PASSWORD' : 'Change Password'}
             onPress={handleChangePassword}
-          >
-            <Text className={themeMode === 'cyberpunk' 
-              ? 'text-yellow-400 font-bold tracking-wider'
-              : 'text-gray-700 font-medium'
-            }>
-              {themeMode === 'cyberpunk' ? 'CHANGE PASSWORD' : 'Change Password'}
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            className={themeMode === 'cyberpunk' 
-              ? 'bg-black border-2 border-red-400 py-3 px-4 rounded-lg items-center'
-              : 'bg-red-50 py-3 px-4 rounded-lg border border-red-200 items-center'
-            }
+          />
+          <ThemedButton
+            title={themeMode === 'cyberpunk' ? 'LOGOUT' : 'Logout'}
             onPress={onLogout}
-          >
-            <Text className={themeMode === 'cyberpunk' 
-              ? 'text-red-400 font-bold tracking-wider'
-              : 'text-red-600 font-medium'
-            }>
-              {themeMode === 'cyberpunk' ? 'LOGOUT' : 'Logout'}
-            </Text>
-          </TouchableOpacity>
+          />
         </View>
       </View>
     </View>

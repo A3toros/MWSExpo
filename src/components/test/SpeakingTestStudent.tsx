@@ -35,7 +35,6 @@ export default function SpeakingTestStudent({
   themeMode = 'light',
 }: SpeakingTestStudentProps) {
   const { state, actions } = useSpeakingTest();
-  const [isProcessing, setIsProcessing] = useState(false);
   const [extractedStudentId, setExtractedStudentId] = useState<string | null>(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const themeClasses = getThemeClasses(themeMode);
@@ -97,9 +96,8 @@ export default function SpeakingTestStudent({
       const timeTaken = Math.round(duration);
       const startedAt = new Date(Date.now() - timeTaken * 1000).toISOString();
       
-      // Get test data to extract teacher_id and subject_id (like web app)
+      // Get test data to extract teacher_id and subject_id (like other tests)
       const currentTest = questions[state.currentQuestionIndex];
-      const testData = currentTest?.test_data || {};
       
       // Get current academic period ID from academic calendar service (like web app)
       await academicCalendarService.loadAcademicCalendar();
@@ -113,8 +111,8 @@ export default function SpeakingTestStudent({
       const submissionData = {
         test_id: testId,
         test_name: testName,
-        teacher_id: testData.teacher_id || null, // From test data like web app
-        subject_id: testData.subject_id || null, // From test data like web app
+        teacher_id: currentTest?.teacher_id || null, // From question data like other tests
+        subject_id: currentTest?.subject_id || null, // From question data like other tests
         student_id: studentId || 'unknown',
         academic_period_id: academic_period_id, // From academic calendar service like web app (number)
         question_id: questions[state.currentQuestionIndex]?.id || 1,
@@ -156,7 +154,6 @@ export default function SpeakingTestStudent({
       console.log('🎤 Calling submitFinalResults...');
       console.log('🎤 ===== ANDROID APP PAYLOAD DEBUG =====');
       console.log('🎤 Submission data being sent:', JSON.stringify(submissionData, null, 2));
-      console.log('🎤 Test data available:', JSON.stringify(testData, null, 2));
       console.log('🎤 Current question:', JSON.stringify(currentTest, null, 2));
       console.log('🎤 Academic period ID type:', typeof academic_period_id, 'value:', academic_period_id);
       console.log('🎤 Audio blob type:', typeof submissionData.audio_blob, 'length:', submissionData.audio_blob?.length || 0);
@@ -290,11 +287,18 @@ export default function SpeakingTestStudent({
               actions.setFeedback(mostRecentAttempt.feedback);
               console.log('🔄 Restored feedback from most recent attempt');
               
-              // Also submit the results if they haven't been submitted yet
-              if (mostRecentAttempt.audioUri && mostRecentAttempt.analysis) {
-                console.log('🔄 Submitting restored results...');
-                submitFinalResults(mostRecentAttempt.audioUri, 0, mostRecentAttempt.analysis);
+              // Restore audioUri and transcript to context state for display
+              if (mostRecentAttempt.audioUri) {
+                actions.stopRecording(mostRecentAttempt.audioUri, 0);
               }
+              if (mostRecentAttempt.analysis) {
+                // CRITICAL FIX: Don't call completeProcessing during state restoration
+                // This was causing auto-submission when returning to dashboard
+                // Just restore the analysis data without triggering processing flow
+                console.log('🔄 Restored analysis data without triggering processing flow');
+              }
+              
+              console.log('🔄 Restored speaking test state from previous attempt');
             }
           }
         } catch (error) {
@@ -320,7 +324,10 @@ export default function SpeakingTestStudent({
                 actions.stopRecording(savedState.audioUri, savedState.audioDuration || 0);
               }
               if (savedState.transcript && savedState.feedback.analysis) {
-                actions.completeProcessing(savedState.transcript, savedState.feedback.analysis);
+                // CRITICAL FIX: Don't call completeProcessing during state restoration
+                // This was causing auto-submission when returning to dashboard
+                // Just restore the feedback without triggering processing flow
+                console.log('🔄 Restored transcript and analysis data without triggering processing flow');
               }
               
               // Restore the feedback and current step
@@ -407,7 +414,6 @@ export default function SpeakingTestStudent({
     actions.stopRecording(audioUri, duration);
     
     // Start processing immediately
-    setIsProcessing(true);
     actions.startProcessing();
     
     try {
@@ -455,8 +461,8 @@ export default function SpeakingTestStudent({
       
       actions.setFeedback(feedback);
       
-      // Submit final results to database immediately after feedback is created
-      await submitFinalResults(audioUri, duration, analysis);
+      // CRITICAL FIX: Don't auto-submit after each recording attempt
+      // Submission will only happen when user clicks "Finish Test" button
       
       // Save attempt to storage (like web app)
       const attemptData = {
@@ -504,7 +510,7 @@ export default function SpeakingTestStudent({
       
       actions.setError(errorMessage);
     } finally {
-      setIsProcessing(false);
+      // Processing state is managed by context, no need to set local state
     }
   }, [actions, state.questions, state.currentQuestionIndex, onAnswerChange]);
 
@@ -531,7 +537,6 @@ export default function SpeakingTestStudent({
     } else {
       // Test completed - submit final results (like web app)
       try {
-        setIsProcessing(true);
         actions.startProcessing();
         
         // Get the current question data
@@ -556,39 +561,8 @@ export default function SpeakingTestStudent({
           throw new Error('Missing required data for submission');
         }
         
-        // Convert audio to base64 for final submission
-        const audioBase64 = await AIProcessingService.convertAudioToBase64(audioUri);
-        
-        // Submit final results
-        const submissionData = {
-          test_id: testId,
-          test_name: testName,
-          student_id: studentId || 'unknown',
-          question_id: currentQuestion?.id || '1',
-          audio_blob: audioBase64,
-          transcript: transcript,
-          scores: {
-            overall_score: analysis.overall_score,
-            word_count: analysis.word_count,
-            grammar_score: analysis.grammar_score,
-            vocabulary_score: analysis.vocabulary_score,
-            pronunciation_score: analysis.pronunciation_score,
-            fluency_score: analysis.fluency_score,
-            content_score: analysis.content_score,
-            grammar_mistakes: analysis.grammar_mistakes,
-            vocabulary_mistakes: analysis.vocabulary_mistakes,
-            ai_feedback: analysis.ai_feedback
-          },
-          audio_duration: state.recordingTime,
-          time_taken: Math.floor((Date.now() - (state.testStartTime || Date.now())) / 1000),
-          caught_cheating: false,
-          visibility_change_times: 0,
-          parent_test_id: testId
-        };
-        
-        console.log('🎤 Submitting final results...', submissionData);
-        const result = await AIProcessingService.submitFinalResults(submissionData);
-        console.log('🎤 Final submission successful:', result);
+        // Use the existing submitFinalResults function for proper submission
+        await submitFinalResults(audioUri, state.recordingTime, analysis);
         
         // Test completed successfully
         onTestComplete({
@@ -597,7 +571,7 @@ export default function SpeakingTestStudent({
           questions: state.questions,
           completed: true,
           timestamp: new Date().toISOString(),
-          result: result,
+          result: { success: true },
           score: analysis.overall_score,
           maxScore: 100,
           percentage: analysis.overall_score
@@ -607,7 +581,7 @@ export default function SpeakingTestStudent({
         console.error('Final submission error:', error);
         actions.setError('Failed to submit test. Please try again.');
       } finally {
-        setIsProcessing(false);
+        // Processing state is managed by context
       }
     }
   }, [state, actions, testId, testName, studentId, onTestComplete]);
@@ -753,7 +727,7 @@ export default function SpeakingTestStudent({
             }`}>
               • {themeMode === 'cyberpunk' ? 'MINIMUM WORDS:' : 'Minimum words:'} {currentQuestion.min_words || 10}
             </Text>
-            <Text className={`text-sm mb-1 ${
+            <Text className={`text-sm ${
               themeMode === 'cyberpunk' 
                 ? 'text-cyan-300' 
                 : themeMode === 'dark' 
@@ -762,17 +736,6 @@ export default function SpeakingTestStudent({
             }`}>
               • {themeMode === 'cyberpunk' ? 'MAXIMUM DURATION:' : 'Maximum duration:'} {Math.floor((currentQuestion.max_duration || 300) / 60)}:{(currentQuestion.max_duration || 300) % 60 < 10 ? '0' : ''}{(currentQuestion.max_duration || 300) % 60} {themeMode === 'cyberpunk' ? 'MINUTES' : 'minutes'}
             </Text>
-            {currentQuestion.expected_keywords && (
-              <Text className={`text-sm ${
-                themeMode === 'cyberpunk' 
-                  ? 'text-cyan-300' 
-                  : themeMode === 'dark' 
-                  ? 'text-gray-400' 
-                  : 'text-gray-600'
-              }`}>
-                • {themeMode === 'cyberpunk' ? 'KEYWORDS TO INCLUDE:' : 'Keywords to include:'} {currentQuestion.expected_keywords.join(', ')}
-              </Text>
-            )}
           </View>
         </View>
 
@@ -830,7 +793,7 @@ export default function SpeakingTestStudent({
               onError={handleError}
               maxDuration={currentQuestion.max_duration || 300}
               minDuration={5}
-              disabled={isProcessing}
+              disabled={state.isProcessing}
               themeMode={themeMode}
             />
           </View>

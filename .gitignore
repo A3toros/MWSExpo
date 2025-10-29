@@ -15,7 +15,7 @@ web-build/
 *.p12
 *.key
 *.mobileprovision
-
+assets/Sketchbook_decoded
 # Metro
 .metro-health-check*
 

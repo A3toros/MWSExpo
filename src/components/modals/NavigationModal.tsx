@@ -1,6 +1,7 @@
 /** @jsxImportSource nativewind */
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
+import { ThemedButton } from '../ui';
 import { Modal } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getModalStyles } from '../../utils/themeUtils';
@@ -68,30 +69,19 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
           </Text>
           
           <View className="flex-row space-x-3">
-            <TouchableOpacity
-              onPress={onCancel}
-              className={`flex-1 py-3 rounded-lg ${getButtonClasses(false)}`}
-            >
-              <Text className={`text-center ${getButtonTextClasses(false)}`}>
-                {themeMode === 'cyberpunk' ? 'STAY' : 'Stay'}
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              onPress={onConfirm}
-              className={`flex-1 py-3 rounded-lg ${getButtonClasses(true)}`}
-              style={themeMode === 'cyberpunk' ? {
-                shadowColor: '#00ffd2',
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.8,
-                shadowRadius: 8,
-                elevation: 8,
-              } : {}}
-            >
-              <Text className={`text-center ${getButtonTextClasses(true)}`}>
-                {themeMode === 'cyberpunk' ? 'LEAVE' : 'Leave'}
-              </Text>
-            </TouchableOpacity>
+            <View className="flex-1">
+              <ThemedButton
+                title={themeMode === 'cyberpunk' ? 'STAY' : 'Stay'}
+                onPress={onCancel}
+              />
+            </View>
+            <View className="flex-1">
+              <ThemedButton
+                title={themeMode === 'cyberpunk' ? 'LEAVE' : 'Leave'}
+                onPress={onConfirm}
+                variant="modal"
+              />
+            </View>
           </View>
         </View>
       </View>

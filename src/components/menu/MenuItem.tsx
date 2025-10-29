@@ -179,7 +179,7 @@ export const MenuItem: React.FC<MenuItemProps> = ({
         </View>
 
         {/* Badge */}
-        {badge && badge > 0 && (
+        {(badge ?? 0) > 0 && (
           <View 
             style={{
               backgroundColor: themeMode === 'cyberpunk' 

@@ -69,70 +69,43 @@ export const MenuHeader: React.FC<MenuHeaderProps> = ({
       style={[animatedStyle]}
       className={`px-6 pt-12 pb-6 border-b ${themeMode === 'cyberpunk' ? 'border-cyan-400/30' : 'border-white/10'}`}
     >
-      <View className="flex-row items-center justify-between mb-6">
-        <View className="flex-1 items-center pt-4">
-          <Text 
-            style={{
-              color: themeMode === 'cyberpunk' ? '#00ffd2' : 'white',
-              fontSize: MenuTheme.typography.heading.fontSize,
-              fontWeight: MenuTheme.typography.heading.fontWeight,
-            }}
-            className={`text-center ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}
-          >
-            {themeMode === 'cyberpunk' ? userName.toUpperCase() : userName}
-          </Text>
-        </View>
-
-        {/* Close button */}
-        <TouchableOpacity 
-          onPress={onClose}
+      <View className="items-center mb-6 pt-4">
+        <Text 
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            backgroundColor: themeMode === 'cyberpunk' 
-              ? 'rgba(0, 255, 210, 0.1)' 
-              : 'rgba(255, 255, 255, 0.1)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            ...MenuTheme.shadows.sm,
+            color: themeMode === 'cyberpunk' ? '#00ffd2' : 'white',
+            fontSize: MenuTheme.typography.heading.fontSize,
+            fontWeight: MenuTheme.typography.heading.fontWeight,
           }}
-          className="ml-4"
+          className={`text-center ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}
         >
-          <Text style={{ 
-            color: themeMode === 'cyberpunk' ? '#00ffd2' : 'white', 
-            fontSize: 18, 
-            fontWeight: '600' 
-          }}>
-            ✕
-          </Text>
-        </TouchableOpacity>
+          {themeMode === 'cyberpunk' ? userName.toUpperCase() : userName}
+        </Text>
       </View>
 
-      {/* User avatar */}
-      <View 
-        style={{
-          width: 60,
-          height: 60,
-          borderRadius: 30,
-          backgroundColor: themeMode === 'cyberpunk' 
-            ? 'rgba(0, 255, 210, 0.2)' 
-            : 'rgba(255, 255, 255, 0.2)',
-          justifyContent: 'center',
-          alignItems: 'center',
-          marginBottom: 12,
-          overflow: 'hidden',
-          ...(themeMode === 'cyberpunk' && {
-            borderWidth: 2,
-            borderColor: '#00ffd2',
-            shadowColor: '#00ffd2',
-            shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.5,
-            shadowRadius: 8,
-            elevation: 8,
-          }),
-        }}
-      >
+      {/* User avatar - Centered */}
+      <View className="items-center mb-6">
+        <View 
+          style={{
+            width: 60,
+            height: 60,
+            borderRadius: 30,
+            backgroundColor: themeMode === 'cyberpunk' 
+              ? 'rgba(0, 255, 210, 0.2)' 
+              : 'rgba(255, 255, 255, 0.2)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            overflow: 'hidden',
+            ...(themeMode === 'cyberpunk' && {
+              borderWidth: 2,
+              borderColor: '#00ffd2',
+              shadowColor: '#00ffd2',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.5,
+              shadowRadius: 8,
+              elevation: 8,
+            }),
+          }}
+        >
         {profilePicture ? (
           <Image 
             source={{ uri: profilePicture }} 
@@ -154,35 +127,7 @@ export const MenuHeader: React.FC<MenuHeaderProps> = ({
             resizeMode="cover"
           />
         )}
-      </View>
-
-      {/* Status indicator */}
-      <View className="flex-row items-center">
-        <View 
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: themeMode === 'cyberpunk' ? '#00ffd2' : MenuTheme.colors.success,
-            marginRight: 8,
-            ...(themeMode === 'cyberpunk' && {
-              shadowColor: '#00ffd2',
-              shadowOffset: { width: 0, height: 0 },
-              shadowOpacity: 0.8,
-              shadowRadius: 4,
-              elevation: 4,
-            }),
-          }}
-        />
-        <Text 
-          style={{
-            color: themeMode === 'cyberpunk' ? '#00ffd2' : 'rgba(255, 255, 255, 0.8)',
-            fontSize: MenuTheme.typography.small.fontSize,
-          }}
-          className={themeMode === 'cyberpunk' ? 'tracking-wider' : ''}
-        >
-          {themeMode === 'cyberpunk' ? 'ONLINE' : 'Online'}
-        </Text>
+        </View>
       </View>
     </Animated.View>
   );

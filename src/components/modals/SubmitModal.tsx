@@ -1,6 +1,7 @@
 /** @jsxImportSource nativewind */
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
+import { ThemedButton } from '../ui';
 import { Modal } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getModalStyles } from '../../utils/themeUtils';
@@ -68,23 +69,12 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
           </Text>
           
           <View className="flex-row gap-4 px-4 pt-4 pb-4">
-            <TouchableOpacity
-              onPress={onCancel}
-              className={`flex-1 py-3 px-4 rounded-lg ${getButtonClasses(false)}`}
-            >
-              <Text className={`${getButtonTextClasses(false)} text-center`}>
-                Cancel
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              onPress={onConfirm}
-              className={`flex-1 py-3 px-4 rounded-lg ${getButtonClasses(true)}`}
-            >
-              <Text className={`${getButtonTextClasses(true)} text-center`}>
-                Submit
-              </Text>
-            </TouchableOpacity>
+            <View className="flex-1">
+              <ThemedButton title="Cancel" onPress={onCancel} />
+            </View>
+            <View className="flex-1">
+              <ThemedButton title="Submit" onPress={onConfirm} variant="modal" />
+            </View>
           </View>
         </View>
       </View>

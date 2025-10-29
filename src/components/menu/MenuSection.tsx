@@ -55,7 +55,12 @@ export const MenuSection: React.FC<MenuSectionProps> = ({
         {title}
       </Text>
       <View>
-        {children}
+        {React.Children.map(children, (child) => {
+          if (typeof child === 'string' || typeof child === 'number') {
+            return <Text>{child}</Text>;
+          }
+          return child as React.ReactNode;
+        })}
       </View>
     </Animated.View>
   );
