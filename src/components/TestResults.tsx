@@ -60,6 +60,15 @@ export default function TestResults({
 }: Props) {
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);
+  try {
+    console.log('📊 TestResults received data:', {
+      type: testResults?.testType,
+      total: testResults?.totalQuestions,
+      score: testResults?.score,
+      qaCount: testResults?.questionAnalysis?.length,
+      firstQA: testResults?.questionAnalysis?.[0]
+    });
+  } catch {}
   if (!testResults || !testResults.showResults) {
     return (
       <View className={`flex-1 justify-center items-center ${themeClasses.background}`}>
@@ -78,6 +87,11 @@ export default function TestResults({
     questionAnalysis,
     timestamp
   } = testResults;
+
+  // Derive correct values locally to avoid relying on stale backend-calculated percentages
+  const derivedCorrect = Array.isArray(questionAnalysis) ? questionAnalysis.filter(q => q.isCorrect).length : (score ?? 0);
+  const derivedTotal = (totalQuestions && totalQuestions > 0) ? totalQuestions : (Array.isArray(questionAnalysis) ? questionAnalysis.length : 0);
+  const derivedPercentage = derivedTotal > 0 ? Math.round((derivedCorrect / derivedTotal) * 100) : 0;
 
   const getTestTypeDisplay = (type: string) => {
     const types: Record<string, string> = {
@@ -116,8 +130,8 @@ export default function TestResults({
     );
   }
 
-  const scoreColor = getScoreColor(percentage);
-  const passStatusColor = getPassStatusColor(passed);
+  const scoreColor = getScoreColor(derivedPercentage);
+  const passStatusColor = getPassStatusColor(derivedPercentage >= 60);
 
   return (
     <ScrollView className={`flex-1 ${themeClasses.background}`}>
@@ -177,13 +191,13 @@ export default function TestResults({
           {/* Score Summary */}
           <View className="flex-row justify-around mb-4">
             <View className={`items-center p-4 rounded-lg flex-1 mx-1 ${themeMode === 'cyberpunk' ? 'bg-black border border-cyan-400/30' : 'bg-gray-50'}`}>
-              <Text className={`text-2xl font-bold ${themeMode === 'cyberpunk' ? 'text-cyan-400' : themeClasses.text}`}>{score}</Text>
+              <Text className={`text-2xl font-bold ${themeMode === 'cyberpunk' ? 'text-cyan-400' : themeClasses.text}`}>{derivedCorrect}</Text>
               <Text className={`text-xs ${themeClasses.textSecondary}`}>
                 {themeMode === 'cyberpunk' ? 'CORRECT ANSWERS' : 'Correct Answers'}
               </Text>
             </View>
             <View className={`items-center p-4 rounded-lg flex-1 mx-1 ${themeMode === 'cyberpunk' ? 'bg-black border border-cyan-400/30' : 'bg-gray-50'}`}>
-              <Text className={`text-2xl font-bold ${themeMode === 'cyberpunk' ? 'text-cyan-400' : themeClasses.text}`}>{totalQuestions}</Text>
+              <Text className={`text-2xl font-bold ${themeMode === 'cyberpunk' ? 'text-cyan-400' : themeClasses.text}`}>{derivedTotal}</Text>
               <Text className={`text-xs ${themeClasses.textSecondary}`}>
                 {themeMode === 'cyberpunk' ? 'TOTAL QUESTIONS' : 'Total Questions'}
               </Text>
@@ -196,7 +210,7 @@ export default function TestResults({
                 className={`text-2xl font-bold ${themeMode === 'cyberpunk' ? 'text-cyan-400' : ''}`}
                 style={{ color: themeMode === 'cyberpunk' ? '#00ffff' : scoreColor.text }}
               >
-                {percentage}%
+                {derivedPercentage}%
               </Text>
               <Text className={`text-xs ${themeClasses.textSecondary}`}>
                 {themeMode === 'cyberpunk' ? 'SCORE' : 'Score'}
@@ -210,7 +224,7 @@ export default function TestResults({
               className="h-3 rounded-lg"
               style={{
                 backgroundColor: themeMode === 'cyberpunk' ? '#00ffff' : scoreColor.text,
-                width: `${percentage}%`
+                width: `${derivedPercentage}%`
               }} 
             />
           </View>
@@ -291,7 +305,9 @@ export default function TestResults({
                           ? (themeMode === 'cyberpunk' ? 'bg-green-900/30 text-green-400 border border-green-400/30' : 'bg-green-100 text-green-800')
                           : (themeMode === 'cyberpunk' ? 'bg-red-900/30 text-red-400 border border-red-400/30' : 'bg-red-100 text-red-800')
                       }`}>
-                        {q.userAnswer || (themeMode === 'cyberpunk' ? 'NO ANSWER PROVIDED' : 'No answer provided')}
+                        {(q.userAnswer !== undefined && q.userAnswer !== null && String(q.userAnswer).length > 0)
+                          ? String(q.userAnswer)
+                          : (themeMode === 'cyberpunk' ? 'NO ANSWER PROVIDED' : 'No answer provided')}
                       </Text>
                     </View>
                     <View>

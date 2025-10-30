@@ -11,6 +11,7 @@ import QuestionRenderer from '../../../../src/components/questions/QuestionRende
 import ProgressTracker from '../../../../src/components/ProgressTracker';
 import TestHeader from '../../../../src/components/TestHeader';
 import { SubmitModal } from '../../../../src/components/modals';
+import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 
@@ -492,25 +493,43 @@ export default function TrueFalseTestScreen() {
 
   if (loading) {
     return (
-      <View className="flex-1 bg-gray-50 justify-center items-center">
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text className="text-base text-gray-500 text-center mt-2">Loading test...</Text>
+      <View className={`flex-1 justify-center items-center ${
+        themeMode === 'cyberpunk' ? 'bg-black' : themeMode === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
+      }`}>
+        <ActivityIndicator size="large" color={themeMode === 'cyberpunk' ? '#00ffff' : themeMode === 'dark' ? '#3b82f6' : '#3B82F6'} />
+        <Text className={`text-base text-center mt-2 ${
+          themeMode === 'cyberpunk' ? 'text-cyan-300 tracking-wider' : themeMode === 'dark' ? 'text-gray-300' : 'text-gray-500'
+        }`}>
+          {themeMode === 'cyberpunk' ? 'LOADING TEST...' : 'Loading test...'}
+        </Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View className="flex-1 bg-gray-50 justify-center items-center px-4">
-        <Text className="text-base text-red-600 text-center">{error}</Text>
+      <View className={`flex-1 justify-center items-center px-4 ${
+        themeMode === 'cyberpunk' ? 'bg-black' : themeMode === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
+      }`}>
+        <Text className={`text-base text-center ${
+          themeMode === 'cyberpunk' ? 'text-red-400 tracking-wider' : themeMode === 'dark' ? 'text-red-300' : 'text-red-600'
+        }`}>
+          {error}
+        </Text>
       </View>
     );
   }
 
   if (!testData || !questions.length) {
     return (
-      <View className="flex-1 bg-gray-50 justify-center items-center px-4">
-        <Text className="text-base text-red-600 text-center">No test data available</Text>
+      <View className={`flex-1 justify-center items-center px-4 ${
+        themeMode === 'cyberpunk' ? 'bg-black' : themeMode === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
+      }`}>
+        <Text className={`text-base text-center ${
+          themeMode === 'cyberpunk' ? 'text-red-400 tracking-wider' : themeMode === 'dark' ? 'text-red-300' : 'text-red-600'
+        }`}>
+          {themeMode === 'cyberpunk' ? 'NO TEST DATA AVAILABLE' : 'No test data available'}
+        </Text>
       </View>
     );
   }
@@ -843,6 +862,7 @@ export default function TrueFalseTestScreen() {
         onCancel={() => setShowSubmitModal(false)}
         testName={testData?.test_name || 'Test'}
       />
+    <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
     </View>
   );
 }

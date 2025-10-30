@@ -4,3 +4,4 @@ export { MenuSection } from './MenuSection';
 export { MenuItem } from './MenuItem';
 export { MenuFooter } from './MenuFooter';
 export { MenuTheme } from './MenuTheme';
+export { default as MenuButton } from './MenuButton';

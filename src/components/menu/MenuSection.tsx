@@ -54,7 +54,7 @@ export const MenuSection: React.FC<MenuSectionProps> = ({
       >
         {title}
       </Text>
-      <View>
+      <View className="gap-3" style={{ paddingBottom: 6, alignItems: 'stretch' }}>
         {React.Children.map(children, (child) => {
           if (typeof child === 'string' || typeof child === 'number') {
             return <Text>{child}</Text>;

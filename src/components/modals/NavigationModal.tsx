@@ -1,7 +1,8 @@
 /** @jsxImportSource nativewind */
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text } from 'react-native';
 import { ThemedButton } from '../ui';
+// Use ThemedButton so global glitch manager controls one-at-a-time
 import { Modal } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getModalStyles } from '../../utils/themeUtils';
@@ -23,6 +24,7 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
 }) => {
   const { themeMode } = useTheme();
   const modalStyles = getModalStyles(themeMode);
+
 
   const getButtonClasses = (isPrimary: boolean) => {
     if (isPrimary) {
@@ -69,19 +71,21 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
           </Text>
           
           <View className="flex-row space-x-3">
-            <View className="flex-1">
-              <ThemedButton
-                title={themeMode === 'cyberpunk' ? 'STAY' : 'Stay'}
-                onPress={onCancel}
-              />
-            </View>
-            <View className="flex-1">
-              <ThemedButton
-                title={themeMode === 'cyberpunk' ? 'LEAVE' : 'Leave'}
-                onPress={onConfirm}
-                variant="modal"
-              />
-            </View>
+            <>
+              <View className="flex-1">
+                <ThemedButton
+                  title={themeMode === 'cyberpunk' ? 'STAY' : 'Stay'}
+                  onPress={onCancel}
+                />
+              </View>
+              <View className="flex-1">
+                <ThemedButton
+                  title={themeMode === 'cyberpunk' ? 'LEAVE' : 'Leave'}
+                  onPress={onConfirm}
+                  variant="modal"
+                />
+              </View>
+            </>
           </View>
         </View>
       </View>

@@ -1,3 +1,4 @@
+/** @jsxImportSource nativewind */
 import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
@@ -9,6 +10,7 @@ import TestHeader from '../../../src/components/TestHeader';
 import { useAppDispatch, useAppSelector } from '../../../src/store';
 import { setAnswer, setIndex, startTest, hydrateFromStorage, tickSecond } from '../../../src/store/slices/testSlice';
 import TestResults from '../../../src/components/TestResults';
+import { LoadingModal } from '../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../src/utils/themeUtils';
 
@@ -317,14 +319,50 @@ export default function TestRunnerScreen() {
     );
   }
 
+  if (loading) {
+    return (
+      <View
+        className="flex-1 justify-center items-center"
+        style={{
+          backgroundColor:
+            themeMode === 'cyberpunk'
+              ? '#000000'
+              : themeMode === 'dark'
+              ? '#0f172a'
+              : '#f8fafc',
+        }}
+      >
+        <ActivityIndicator
+          size="large"
+          color={themeMode === 'cyberpunk' ? '#00ffd2' : themeMode === 'dark' ? '#3b82f6' : '#2563eb'}
+        />
+        <Text
+          className={`mt-3 ${
+            themeMode === 'cyberpunk'
+              ? 'text-cyan-400 tracking-wider'
+              : themeMode === 'dark'
+              ? 'text-gray-300'
+              : 'text-gray-700'
+          }`}
+        >
+          {themeMode === 'cyberpunk' ? 'LOADING TEST…' : 'Loading test…'}
+        </Text>
+      </View>
+    );
+  }
+
   return (
-    <View className={`flex-1 p-4 ${
-      themeMode === 'cyberpunk' 
-        ? 'bg-black' 
-        : themeMode === 'dark' 
-        ? 'bg-gray-900' 
-        : 'bg-gray-50'
-    }`}>
+    <View
+      className="flex-1 p-4"
+      style={{
+        backgroundColor:
+          themeMode === 'cyberpunk'
+            ? '#000000'
+            : themeMode === 'dark'
+            ? '#0f172a'
+            : '#f8fafc',
+      }}
+    >
       <View className="mb-4">
         <Text className={`text-2xl font-bold ${
           themeMode === 'cyberpunk' 
@@ -597,14 +635,8 @@ export default function TestRunnerScreen() {
           </Text>
         </View>
       )}
-      {loading ? (
-        <View className="flex-1 justify-center items-center">
-          <ActivityIndicator 
-            size="large" 
-            color={themeMode === 'cyberpunk' ? '#00ffff' : themeMode === 'dark' ? '#3b82f6' : '#2563eb'} 
-          />
-        </View>
-      ) : error ? (
+      <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
+      {error ? (
         <View className="flex-1 justify-center items-center">
           <Text className={`text-lg ${
             themeMode === 'cyberpunk' 

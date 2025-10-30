@@ -19,6 +19,24 @@ export const LoadingModal: React.FC<LoadingModalProps> = ({
   const { themeMode } = useTheme();
   const modalStyles = getModalStyles(themeMode);
 
+  const overlayBg = themeMode === 'cyberpunk'
+    ? 'bg-black/90'
+    : themeMode === 'dark'
+    ? 'bg-gray-900/90'
+    : 'bg-white/90';
+
+  const cardClasses = themeMode === 'cyberpunk'
+    ? 'bg-black border border-cyan-400/30'
+    : themeMode === 'dark'
+    ? 'bg-gray-800'
+    : 'bg-white';
+
+  const textClasses = themeMode === 'cyberpunk'
+    ? 'text-cyan-300 tracking-wider'
+    : themeMode === 'dark'
+    ? 'text-gray-200'
+    : 'text-gray-700';
+
   const getSpinnerColor = () => {
     switch (themeMode) {
       case 'cyberpunk': return '#00ffd2'; // Cyan
@@ -33,8 +51,8 @@ export const LoadingModal: React.FC<LoadingModalProps> = ({
       transparent={true}
       animationType="fade"
     >
-      <View className={modalStyles.overlay}>
-        <View className={modalStyles.container}>
+      <View className={`flex-1 justify-center items-center ${overlayBg}`}>
+        <View className={`px-6 py-5 rounded-xl ${cardClasses}`}>
           {showSpinner && (
             <ActivityIndicator 
               size="large" 
@@ -42,8 +60,8 @@ export const LoadingModal: React.FC<LoadingModalProps> = ({
               className="mb-4"
             />
           )}
-          <Text className={modalStyles.text}>
-            {message}
+          <Text className={`text-center ${textClasses}`}>
+            {themeMode === 'cyberpunk' ? message.toUpperCase() : message}
           </Text>
         </View>
       </View>

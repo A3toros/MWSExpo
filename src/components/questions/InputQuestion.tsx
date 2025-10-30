@@ -86,6 +86,7 @@ export default function InputQuestion({
         // Use a more specific key to avoid conflicts between questions
         const saveKey = `test_progress_${studentId}_${testType}_${testId}_${questionId}`;
         AsyncStorage.setItem(saveKey, answer);
+        console.log('💾 Auto-save input answer', { saveKey, length: answer?.length ?? 0, answer });
         setLastSaved(new Date().toLocaleTimeString());
         setTimeout(() => setIsAutoSaving(false), 1000);
       }, 1000);
@@ -102,6 +103,10 @@ export default function InputQuestion({
   // Handle answer change
   const handleAnswerChange = useCallback((text: string) => {
     setAnswer(text);
+    try {
+      const qid = question.question_id || question.id;
+      console.log('📝 InputQuestion onChange', { qid, length: text?.length ?? 0, text });
+    } catch {}
     if (onAnswerChange) {
       const questionId = question.question_id || question.id;
       if (questionId !== undefined) {

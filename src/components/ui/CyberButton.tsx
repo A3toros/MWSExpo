@@ -1,6 +1,6 @@
 /** @jsxImportSource nativewind */
 import React from 'react';
-import { TouchableOpacity, View, Text, ViewStyle, StyleProp, Animated, Easing } from 'react-native';
+import { TouchableOpacity, View, Text, ViewStyle, StyleProp } from 'react-native';
 import Svg, { Defs, ClipPath, Polygon, Rect } from 'react-native-svg';
 
 type CyberButtonProps = {
@@ -69,72 +69,10 @@ export const CyberButton: React.FC<CyberButtonProps> = ({
   const shadowColor = '#00ffd2'; // --button-shadow-primary: var(--cyan)
   const textColor = color === 'yellow' ? '#000000' : '#ffffff';
   const [dimensions, setDimensions] = React.useState({ width: 0, height: 0 });
-  const glitchOpacity = React.useRef(new Animated.Value(1)).current;
-  const glitchBlinkRef = React.useRef<Animated.CompositeAnimation | null>(null);
-  const glitchTranslate = React.useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const glitchTranslateRef = React.useRef<Animated.CompositeAnimation | null>(null);
+  // No built-in glitch here; modals use react-native-cyberpunk-button instead
 
-  const glitchOverlayOpacity = React.useMemo(
-    () => glitchOpacity.interpolate({ inputRange: [0, 1], outputRange: [0, 0.45] }),
-    [glitchOpacity],
-  );
-  const glitchOverlayOpacitySecondary = React.useMemo(
-    () => glitchOpacity.interpolate({ inputRange: [0, 1], outputRange: [0, 0.25] }),
-    [glitchOpacity],
-  );
 
-  React.useEffect(() => {
-    glitchBlinkRef.current?.stop();
-    glitchOpacity.setValue(1);
-
-    const sequence = Animated.sequence(
-      CYBER_GLITCH_4_TIMELINE.map(({ value, duration }) =>
-        Animated.timing(glitchOpacity, {
-          toValue: value,
-          duration,
-          useNativeDriver: true,
-        }),
-      ),
-    );
-
-    const loop = Animated.loop(sequence);
-    glitchBlinkRef.current = loop;
-    loop.start();
-
-    return () => {
-      loop.stop();
-    };
-  }, [glitchOpacity]);
-
-  React.useEffect(() => {
-    glitchTranslateRef.current?.stop();
-    glitchTranslate.setValue({ x: 0, y: 0 });
-
-    const translateSequence = Animated.sequence(
-      GLITCH_TRANSLATE_KEYFRAMES.map(({ x, y, duration }) =>
-        Animated.timing(glitchTranslate, {
-          toValue: { x, y },
-          duration,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-      ),
-    );
-
-    const translateLoop = Animated.loop(translateSequence);
-    glitchTranslateRef.current = translateLoop;
-    translateLoop.start();
-
-    return () => {
-      translateLoop.stop();
-    };
-  }, [glitchTranslate]);
-
-  const glitchTransform = glitchTranslate.getTranslateTransform();
-  const glitchInverseTransform = [
-    { translateX: Animated.multiply(glitchTranslate.x, -1) },
-    { translateY: Animated.multiply(glitchTranslate.y, -1) },
-  ];
+  // No scan animation here
 
   return (
     <TouchableOpacity
@@ -264,68 +202,16 @@ export const CyberButton: React.FC<CyberButtonProps> = ({
             <Text className="font-semibold tracking-wider" style={{ color: textColor, textAlign: 'center' }}>
               {children}
             </Text>
-            <Animated.Text
-              className="font-semibold tracking-wider"
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                color: color === 'yellow' ? '#00ffd2' : '#f8ef02',
-                textShadowColor: '#ff003c',
-                textShadowOffset: { width: 0, height: 0 },
-                textShadowRadius: 6,
-                opacity: glitchOverlayOpacity,
-                transform: glitchTransform,
-                textAlign: 'center',
-              }}
-            >
-              {children}
-            </Animated.Text>
-            <Animated.Text
-              className="font-semibold tracking-wider"
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                color: color === 'yellow' ? '#ff003c' : '#00ffd2',
-                textShadowColor: '#000000',
-                textShadowOffset: { width: 0, height: 0 },
-                textShadowRadius: 4,
-                opacity: glitchOverlayOpacitySecondary,
-                transform: glitchInverseTransform,
-                textAlign: 'center',
-              }}
-            >
-              {children}
-            </Animated.Text>
           </View>
 
-          {/* Glitch text (visual accent) */}
-          {glitchText ? (
-            <Animated.View
-              pointerEvents="none"
-              className="absolute left-2 top-1.5"
-              style={{ opacity: glitchOpacity }}
-            >
-              <Text
-                style={{
-                  color: textColor,
-                  opacity: 0.15,
-                  fontWeight: '800',
-                  letterSpacing: 1,
-                }}
-              >
-                {glitchText}
-              </Text>
-            </Animated.View>
-          ) : null}
+          {/* No overlay glitch slice in app-level button */}
 
           {/* Tag (e.g., R25) */}
           {tag ? (
             <Animated.View
               pointerEvents="none"
               className="absolute right-2 top-1.5 rounded-sm px-1"
-              style={{ backgroundColor: 'rgba(0,0,0,0.25)', opacity: glitchOpacity }}
+              style={{ backgroundColor: 'rgba(0,0,0,0.25)', opacity: 1 }}
             >
               <Text className="text-white text-[10px] font-bold">{tag}</Text>
             </Animated.View>

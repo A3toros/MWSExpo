@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import QuestionRenderer from '../../../../src/components/questions/QuestionRenderer';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
 import { SubmitModal } from '../../../../src/components/modals';
+import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import TestHeader from '../../../../src/components/TestHeader';
@@ -774,6 +775,7 @@ export default function MultipleChoiceTestScreen() {
         onCancel={() => setShowSubmitModal(false)}
         testName={testData?.test_name || testData?.title || 'Test'}
       />
+      <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
     </View>
   );
 }

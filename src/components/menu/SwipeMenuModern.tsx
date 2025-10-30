@@ -5,10 +5,7 @@ import Animated, {
   useAnimatedStyle, 
   useSharedValue, 
   withSpring, 
-  withTiming,
-  interpolate,
-  Extrapolate,
-  runOnJS
+  withTiming
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -16,7 +13,6 @@ import { MenuHeader } from './MenuHeader';
 import { MenuSection } from './MenuSection';
 import { MenuItem } from './MenuItem';
 import { MenuFooter } from './MenuFooter';
-import { MenuTheme } from './MenuTheme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses } from '../../utils/themeUtils';
 
@@ -38,7 +34,6 @@ export default function SwipeMenuModern({
   activeTestsCount = 0
 }: SwipeMenuModernProps) {
   const { themeMode } = useTheme();
-  const themeClasses = getThemeClasses(themeMode);
   const screenHeight = Dimensions.get('window').height;
   const screenWidth = Dimensions.get('window').width;
   const menuWidth = screenWidth * 0.75; // Slightly wider for modern look
@@ -146,6 +141,8 @@ export default function SwipeMenuModern({
                   icon="🏠"
                   title="Dashboard"
                   subtitle="View your progress"
+                  cyberStyle={themeMode === 'cyberpunk'}
+                  color={themeMode === 'cyberpunk' ? 'red' : undefined}
                   onPress={() => {
                     onClose();
                     onNavigate('dashboard');
@@ -157,6 +154,8 @@ export default function SwipeMenuModern({
                   title="Active Tests"
                   subtitle="Continue your tests"
                   badge={activeTestsCount}
+                  cyberStyle={themeMode === 'cyberpunk'}
+                  color={themeMode === 'cyberpunk' ? 'yellow' : undefined}
                   onPress={() => {
                     onClose();
                     onNavigate('active');
@@ -167,6 +166,8 @@ export default function SwipeMenuModern({
                   icon="📊"
                   title="Results"
                   subtitle="View your scores"
+                  cyberStyle={themeMode === 'cyberpunk'}
+                  color={themeMode === 'cyberpunk' ? 'purple' : undefined}
                   onPress={() => {
                     onClose();
                     onNavigate('results');
@@ -181,6 +182,8 @@ export default function SwipeMenuModern({
                   icon="👤"
                   title="Profile"
                   subtitle="Manage your account"
+                  cyberStyle={themeMode === 'cyberpunk'}
+                  color={themeMode === 'cyberpunk' ? 'green' : undefined}
                   onPress={() => {
                     onClose();
                     onNavigate('profile');
@@ -191,6 +194,8 @@ export default function SwipeMenuModern({
                   icon="⚙️"
                   title="Settings"
                   subtitle="App preferences"
+                  cyberStyle={themeMode === 'cyberpunk'}
+                  color={themeMode === 'cyberpunk' ? 'cyan' : undefined}
                   onPress={() => {
                     onClose();
                     onNavigate('settings');
@@ -205,6 +210,8 @@ export default function SwipeMenuModern({
                   icon="❓"
                   title="Help & FAQ"
                   subtitle="Get assistance"
+                  cyberStyle={themeMode === 'cyberpunk'}
+                  color={themeMode === 'cyberpunk' ? 'blue' : undefined}
                   onPress={() => {
                     onClose();
                     onNavigate('help');
@@ -215,6 +222,8 @@ export default function SwipeMenuModern({
                   icon="💬"
                   title="Feedback"
                   subtitle="Share your thoughts"
+                  cyberStyle={themeMode === 'cyberpunk'}
+                  color={themeMode === 'cyberpunk' ? 'purple' : undefined}
                   onPress={() => {
                     onClose();
                     onNavigate('feedback');
@@ -225,6 +234,8 @@ export default function SwipeMenuModern({
                   icon="ℹ️"
                   title="About"
                   subtitle="App information"
+                  cyberStyle={themeMode === 'cyberpunk'}
+                  color={themeMode === 'cyberpunk' ? 'red' : undefined}
                   onPress={() => {
                     onClose();
                     onNavigate('about');

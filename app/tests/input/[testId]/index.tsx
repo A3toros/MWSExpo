@@ -41,10 +41,31 @@ export default function TestRunnerScreen() {
   const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
   const [caughtCheating, setCaughtCheating] = useState(false);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
+  const resultsCommittedRef = useRef<boolean>(false);
 
   // Simple student ID extraction from JWT (like multiple-choice test)
   const getStudentIdFromToken = async (): Promise<string | null> => {
     try {
+      // Compute score locally for input tests using correct_answers (case-insensitive)
+      const computedScore = (() => {
+        try {
+          if (!Array.isArray(questions) || questions.length === 0) return 0;
+          let correct = 0;
+          for (let i = 0; i < questions.length; i++) {
+            const q = questions[i];
+            const qid = String(q?.id ?? q?.question_id ?? i);
+            const val = String(answers[qid] ?? '').trim().toLowerCase();
+            const list = Array.isArray(q?.correct_answers) ? q.correct_answers : (q?.correct_answer ? [q.correct_answer] : []);
+            const normalized = list.map((s: any) => String(s ?? '').trim().toLowerCase()).filter(Boolean);
+            if (val.length > 0 && normalized.length > 0 && normalized.includes(val)) {
+              correct += 1;
+            }
+          }
+          return correct;
+        } catch {
+          return 0;
+        }
+      })();
       const token = await AsyncStorage.getItem('auth_token');
       if (!token) return null;
       
@@ -291,6 +312,9 @@ export default function TestRunnerScreen() {
 
   // Handle test completion
   const handleTestComplete = useCallback(() => {
+    if (resultsCommittedRef.current) {
+      return; // Prevent overwriting already committed results
+    }
     // Calculate results
     const correctAnswers = questions.filter((q: any, index: number) => {
       const qid = q?.id ?? q?.question_id ?? `q_${index}`;
@@ -314,9 +338,16 @@ export default function TestRunnerScreen() {
     const passed = percentage >= 60;
 
     // Create question analysis
+    console.log('🧮 Building local results with answers map:', answers);
     const questionAnalysis = questions.map((q: any, index: number) => {
-      const qid = String(q.id ?? index);
-      const value = answers[qid];
+      const qid = String(q?.id ?? q?.question_id ?? index);
+      // Robust lookup: string key, numeric key, and raw question_id
+      const value =
+        answers?.[qid] ??
+        answers?.[q?.id as any] ??
+        answers?.[q?.question_id as any] ??
+        answers?.[String(q?.question_id)] ?? '';
+      console.log('🔗 Map question -> answer', { qid, question_id: q?.question_id, hasValue: value != null, value });
       const qtype = String(q.question_type || '');
       
       let isCorrect = false;
@@ -334,7 +365,8 @@ export default function TestRunnerScreen() {
       } else if (qtype === 'input') {
         isCorrect = typeof value === 'string' && value.trim().length > 0;
         userAnswer = String(value) || 'No answer';
-        correctAnswer = q.correct_answer || 'Correct answer'; // This would come from the question data
+        const fromArray = Array.isArray(q.correct_answers) ? q.correct_answers.join(', ') : undefined;
+        correctAnswer = fromArray || q.correct_answer || 'Correct answer';
       } else if (qtype === 'fill_blanks') {
         isCorrect = Array.isArray(value) && value.length > 0;
         userAnswer = Array.isArray(value) ? value.join(', ') : 'No answer';
@@ -395,8 +427,48 @@ export default function TestRunnerScreen() {
     setTestResults(null);
     setShowResults(false);
     // Navigate back to dashboard
-    router.push('/(tabs)');
+    requestAnimationFrame(() => {
+      router.replace('/(tabs)');
+    });
   }, [router]);
+
+  // Helper: build local results from a provided answers snapshot
+  const buildLocalResults = useCallback((answersSnapshot: Record<string, any>) => {
+    const total = questions.length;
+    const questionAnalysis = questions.map((q: any, index: number) => {
+      const qid = String(q?.id ?? q?.question_id ?? index);
+      const value = answersSnapshot?.[qid] ?? answersSnapshot?.[q?.question_id as any] ?? answersSnapshot?.[String(q?.question_id)] ?? '';
+      const userAnswer = String(value || '');
+      const list = Array.isArray(q?.correct_answers) ? q.correct_answers : (q?.correct_answer ? [q.correct_answer] : []);
+      const normalized = list.map((s: any) => String(s ?? '').trim().toLowerCase());
+      const isCorrect = userAnswer.trim().length > 0 && normalized.length > 0 && normalized.includes(userAnswer.trim().toLowerCase());
+      return {
+        questionNumber: index + 1,
+        question: q.question_text || q.question || `Question ${index + 1}`,
+        userAnswer,
+        correctAnswer: normalized.join(', '),
+        isCorrect,
+        score: isCorrect ? 1 : 0,
+        maxScore: 1,
+      };
+    });
+    const correctCount = questionAnalysis.filter(q => q.isCorrect).length;
+    setTestResults({
+      showResults: true,
+      testInfo: { test_name: testData?.test_name || testData?.title || `Test ${testId}`, id: testId as any, test_id: testId as any },
+      testType: String('input'),
+      score: correctCount,
+      totalQuestions: total,
+      percentage: total > 0 ? Math.round((correctCount / total) * 100) : 0,
+      passed: total > 0 ? (Math.round((correctCount / total) * 100) >= 60) : false,
+      questionAnalysis,
+      timestamp: new Date().toISOString(),
+      caught_cheating: caughtCheating,
+      visibility_change_times: visibilityChangeTimes,
+    });
+    resultsCommittedRef.current = true;
+    setShowResults(true);
+  }, [questions, testData, testId, caughtCheating, visibilityChangeTimes]);
 
   // Handle test submission
   const handleSubmit = useCallback(async () => {
@@ -418,7 +490,26 @@ export default function TestRunnerScreen() {
     
     setIsSubmitting(true);
     setSubmitError(null);
-    
+
+    // Pre-compute score for input questions using correct_answers
+    const computedScore = (() => {
+      try {
+        if (!Array.isArray(questions) || questions.length === 0) return 0;
+        let correct = 0;
+        for (let i = 0; i < questions.length; i++) {
+          const q = questions[i];
+          const qid = String(q?.id ?? q?.question_id ?? i);
+          const val = String(answers[qid] ?? '').trim().toLowerCase();
+          const list = Array.isArray(q?.correct_answers) ? q.correct_answers : (q?.correct_answer ? [q.correct_answer] : []);
+          const normalized = list.map((s: any) => String(s ?? '').trim().toLowerCase()).filter(Boolean);
+          if (val.length > 0 && normalized.length > 0 && normalized.includes(val)) correct += 1;
+        }
+        return correct;
+      } catch {
+        return 0;
+      }
+    })();
+
     try {
       
       const payload = {
@@ -434,10 +525,10 @@ export default function TestRunnerScreen() {
           return currentTerm?.id || testData.academic_period_id;
         })(),
         answers: answers,
-        score: 0, // Calculate score like multiple choice
+        score: computedScore,
         maxScore: questions.length,
-        time_taken: 0, // Use 0 like multiple choice
-        started_at: new Date().toISOString(), // Use current time like multiple choice
+        time_taken: seconds, 
+        started_at: new Date(Date.now() - (seconds * 1000)).toISOString(),
         submitted_at: new Date().toISOString(),
         caught_cheating: caughtCheating,
         visibility_change_times: visibilityChangeTimes,
@@ -472,8 +563,8 @@ export default function TestRunnerScreen() {
             console.log('🎓 Test results cached with key:', cacheKey);
           }
           
-          setTestResults(response.data);
-          setShowResults(true);
+          // Build local detailed analysis from the exact snapshot we submitted
+          buildLocalResults(answers);
         } else {
           throw new Error(response.data.error || response.data.message || 'Test submission failed');
         }
@@ -601,8 +692,10 @@ export default function TestRunnerScreen() {
               // Ensure each question has a unique ID
               const qid = q?.id ?? q?.question_id ?? `q_${index}`;
               const value = answers[String(qid)] as any;
-              const onChange = (questionId: string | number, val: any) =>
+              const onChange = (questionId: string | number, val: any) => {
+                console.log('➡️ setAnswer dispatch', { questionId: String(questionId), value: val, len: (val ?? '').length });
                 dispatch(setAnswer({ questionId: String(questionId), value: val }));
+              };
               
               
               return (

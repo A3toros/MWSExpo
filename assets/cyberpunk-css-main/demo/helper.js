@@ -77,4 +77,21 @@ codes[9] =
     {
         $("#code" + String(index)).html(encode(String(this)));
     })
+
+    // Randomize glitch timing per button so they are not synchronized
+    function rand(min, max){ return Math.random() * (max - min) + min; }
+    function setRandomTiming(el)
+    {
+        var duration = rand(1, 10).toFixed(2) + 's';
+        // random phase in [0,10)s; used as negative delay in CSS to desync
+        var delay = rand(0, 10).toFixed(2) + 's';
+        $(el).css('--glitch-duration', duration);
+        $(el).css('--glitch-delay', delay);
+    }
+
+    $('.glitchtext').each(function(){
+        setRandomTiming(this);
+        // Re-randomize on each completed cycle
+        this.addEventListener('animationiteration', () => setRandomTiming(this));
+    });
 })

@@ -1,7 +1,9 @@
 /** @jsxImportSource nativewind */
-import React from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TouchableOpacity, View, Text, StyleProp, ViewStyle } from 'react-native';
 import CyberButton from './CyberButton';
+import CyberpunkButton from 'react-native-cyberpunk-button';
+import { useOneAtATimeGlitch } from '../../utils/useOneAtATimeGlitch';
 import { useTheme } from '../../contexts/ThemeContext';
 
 type ThemedButtonProps = {
@@ -27,20 +29,31 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
 }) => {
   const { themeMode } = useTheme();
 
-  if (themeMode === 'cyberpunk' && variant !== 'submit') {
+  if (themeMode === 'cyberpunk') {
+    // Smaller sizes (about -30%)
+    const buttonHeight = size === 'lg' ? 42 : size === 'sm' ? 31 : 36;
+    const isModal = variant === 'modal';
+    const mainColor = isModal ? '#f8ef02' : '#ff003c';
+    const labelColor = isModal ? '#000000' : '#ffffff';
+
+    const { active: isActive, id } = useOneAtATimeGlitch();
     return (
-      <CyberButton
-        onPress={onPress}
-        disabled={disabled}
-        style={style}
-        size={size}
-        tag={tag}
-        glitchText={glitchText}
-        color={variant === 'modal' ? 'yellow' : 'red'}
-        diagonalCut={variant === 'modal'}
-      >
-        {title}
-      </CyberButton>
+      <TouchableOpacity onPress={disabled ? undefined : onPress} disabled={disabled} style={style} activeOpacity={0.8}>
+        <CyberpunkButton
+          key={`${id}-${isActive ? 'on' : 'off'}`}
+          label={title}
+          // do not pass onPress to library button to avoid overlay intercepting touches
+          buttonHeight={buttonHeight}
+          mainColor={mainColor}
+          shadowColor="#00ffd2"
+          glitchDuration={900}
+          glitchAmplitude={10}
+          repeatDelay={1500}
+          labelTextStyle={{ fontWeight: '800', letterSpacing: 1, color: labelColor }}
+          labelContainerStyle={undefined}
+          disableAutoAnimation={!isActive}
+        />
+      </TouchableOpacity>
     );
   }
 
