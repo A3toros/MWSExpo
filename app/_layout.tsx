@@ -76,6 +76,8 @@ function AppContent() {
               <Stack>
                 <Stack.Screen name="auth" options={{ headerShown: false }} />
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                {/* Hide native header for all test routes; keep custom headers */}
+                <Stack.Screen name="tests" options={{ headerShown: false }} />
                 <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
               </Stack>
             ) : null}

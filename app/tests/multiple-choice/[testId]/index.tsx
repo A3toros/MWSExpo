@@ -1,6 +1,6 @@
 /** @jsxImportSource nativewind */
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, Alert, ActivityIndicator, ScrollView, TouchableOpacity, AppState } from 'react-native';
+import { View, Text, Alert, ActivityIndicator, ScrollView, TouchableOpacity, AppState, Image } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../../../../src/store';
 import { hydrateSuccess } from '../../../../src/store/slices/authSlice';
@@ -336,33 +336,13 @@ export default function MultipleChoiceTestScreen() {
     });
   }, [questions]);
 
-  // Submit test
-  const handleSubmit = useCallback(async () => {
-    if (isLoadingUser) {
-      Alert.alert('Please Wait', 'Loading user data...');
+  // Submit test (open custom modal only)
+  const handleSubmit = useCallback(() => {
+    if (isLoadingUser || !user?.student_id || !testData || !questions.length) {
       return;
     }
-    
-    if (!user?.student_id) {
-      Alert.alert('Error', 'User data not loaded. Please try again.');
-      return;
-    }
-    
-    if (!testData || !questions.length) {
-      Alert.alert('Error', `Missing required data for submission:\n- Test Data: ${!!testData}\n- Questions: ${questions.length}`);
-      return;
-    }
-
-    // Show confirmation dialog before submitting
-    Alert.alert(
-      'Submit Test',
-      'Are you sure you want to submit your test? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Submit', style: 'destructive', onPress: () => submitTest() }
-      ]
-    );
-  }, [user?.student_id, testData, questions, answers, testId]);
+    setShowSubmitModal(true);
+  }, [isLoadingUser, user?.student_id, testData, questions.length]);
 
   // Actual submit function
   const submitTest = useCallback(async () => {
@@ -399,6 +379,45 @@ export default function MultipleChoiceTestScreen() {
       const score = correctAnswers;
       const maxScore = questions.length;
       const percentage = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+
+      // Helper to resolve an answer letter to its option text for a given question
+      const getOptionText = (question: any, answerLetter: string): string => {
+        if (!answerLetter) return '';
+        const key = String(answerLetter).trim().toUpperCase();
+        // 1) options: [{ value: 'A', text: '...' }] or [{ key:'A', label:'...' }]
+        if (Array.isArray(question?.options)) {
+          const byKey = question.options.find((o: any) => (
+            (String(o?.value || o?.key || o?.id || '').toUpperCase() === key) ||
+            (String(o?.letter || '').toUpperCase() === key)
+          ));
+          if (byKey) return byKey.text || byKey.label || byKey.value || byKey.key || '';
+          // If plain array of strings, map A->0, B->1 ...
+          if (question.options.length && typeof question.options[0] === 'string') {
+            const idx = Math.max(0, key.charCodeAt(0) - 'A'.charCodeAt(0));
+            return question.options[idx] || '';
+          }
+        }
+        // 2) object with option_a/option_b...
+        const mapKey = {
+          'A': question?.option_a || question?.a,
+          'B': question?.option_b || question?.b,
+          'C': question?.option_c || question?.c,
+          'D': question?.option_d || question?.d,
+          'E': (question?.option_e || question?.e)
+        } as any;
+        if (mapKey[key]) return String(mapKey[key]);
+        // 3) choices JSON in question.choices or question.answers
+        try {
+          const choices = typeof question?.choices === 'string' ? JSON.parse(question.choices) : question?.choices;
+          if (Array.isArray(choices)) {
+            const idx = Math.max(0, key.charCodeAt(0) - 'A'.charCodeAt(0));
+            if (typeof choices[0] === 'string') return choices[idx] || '';
+            const byKey2 = choices.find((o: any) => String(o?.value || o?.key || '').toUpperCase() === key);
+            if (byKey2) return byKey2.text || byKey2.label || '';
+          }
+        } catch {}
+        return '';
+      };
 
       const submissionData = {
         test_id: testId,
@@ -458,13 +477,19 @@ export default function MultipleChoiceTestScreen() {
           score: score,
           maxScore: maxScore,
           percentage: percentage,
-          questions: questions.map((question, index) => ({
-            questionNumber: index + 1,
-            questionText: question.question,
-            correctAnswer: question.correct_answer,
-            studentAnswer: answers[index] || '',
-            isCorrect: (answers[index]?.trim().toLowerCase() === (question.correct_answer?.trim()?.toLowerCase() || ''))
-          }))
+          questions: questions.map((question, index) => {
+            const letterCorrect = question.correct_answer || '';
+            const letterUser = answers[index] || '';
+            return {
+              questionNumber: index + 1,
+              questionText: question.question,
+              correctAnswer: letterCorrect,
+              correctAnswerText: getOptionText(question, letterCorrect),
+              studentAnswer: letterUser,
+              studentAnswerText: getOptionText(question, letterUser),
+              isCorrect: (letterUser?.trim()?.toLowerCase() === (letterCorrect?.trim()?.toLowerCase() || ''))
+            };
+          })
         };
         
         setTestResults(detailedResults);
@@ -604,9 +629,19 @@ export default function MultipleChoiceTestScreen() {
               ? 'bg-gray-800 border-gray-600' 
               : 'bg-white border-gray-200'
           }`}>
-            <View className="bg-[#8B5CF6] p-6 rounded-lg mb-6">
-              <Text className="text-xl font-bold text-white text-center mb-2">Your Score</Text>
-              <Text className="text-3xl font-bold text-white text-center">
+            <View className={`p-6 rounded-lg mb-6 ${
+              themeMode === 'cyberpunk'
+                ? 'bg-black border border-cyan-400/30'
+                : themeMode === 'dark'
+                ? 'bg-gray-800 border border-gray-600'
+                : 'bg-[#8B5CF6]'
+            }`}>
+              <Text className={`text-xl font-bold text-center mb-2 ${
+                themeMode === 'cyberpunk' ? 'text-cyan-400 tracking-wider' : 'text-white'
+              }`}>Your Score</Text>
+              <Text className={`text-3xl font-bold text-center ${
+                themeMode === 'cyberpunk' ? 'text-cyan-300' : 'text-white'
+              }`}>
                 {testResults.score}/{testResults.maxScore} ({testResults.percentage}%)
               </Text>
             </View>
@@ -614,9 +649,17 @@ export default function MultipleChoiceTestScreen() {
             <View className="mb-6">
               <Text className="text-xl font-bold text-gray-800 mb-4">Question Review</Text>
               {testResults.questions.map((result: any, index: number) => (
-                <View key={index} className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <View key={index} className={`mb-4 p-4 rounded-lg border ${
+                  themeMode === 'cyberpunk' 
+                    ? 'bg-black border-cyan-400/30' 
+                    : themeMode === 'dark' 
+                    ? 'bg-gray-800 border-gray-600' 
+                    : 'bg-gray-50 border-gray-200'
+                }`}>
                   <View className="flex-row justify-between items-center mb-3">
-                    <Text className="text-lg font-semibold text-gray-800">Question {result.questionNumber}</Text>
+                    <Text className={`text-lg font-semibold ${
+                      themeMode === 'cyberpunk' ? 'text-cyan-300 tracking-wider' : themeMode === 'dark' ? 'text-white' : 'text-gray-800'
+                    }`}>Question {result.questionNumber}</Text>
                     <View className={`px-3 py-1 rounded-full ${
                       result.isCorrect ? 'bg-green-100' : 'bg-red-100'
                     }`}>
@@ -628,21 +671,31 @@ export default function MultipleChoiceTestScreen() {
                     </View>
                   </View>
                   
-                  <Text className="text-base text-gray-700 mb-4">{result.questionText || result.question}</Text>
+                  <Text className={`text-base mb-4 ${
+                    themeMode === 'cyberpunk' ? 'text-cyan-200' : themeMode === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                  }`}>{result.questionText || result.question}</Text>
                   
                   <View className="space-y-2">
                     <View className="flex-row justify-between">
-                      <Text className="font-semibold text-gray-600">Your Answer:</Text>
+                      <Text className={`font-semibold ${
+                        themeMode === 'cyberpunk' ? 'text-cyan-300' : themeMode === 'dark' ? 'text-gray-300' : 'text-gray-600'
+                      }`}>Your Answer:</Text>
                       <Text className={`font-medium ${
                         result.isCorrect ? 'text-green-600' : 'text-red-600'
                       }`}>
-                        {result.studentAnswer || 'No answer'}
+                        {result.studentAnswer || 'No answer'}{result.studentAnswerText ? ` — ${result.studentAnswerText}` : ''}
                       </Text>
                     </View>
                     
                     <View className="flex-row justify-between">
-                      <Text className="font-semibold text-gray-600">Correct Answer:</Text>
-                      <Text className="font-medium text-gray-800">{result.correctAnswer}</Text>
+                      <Text className={`font-semibold ${
+                        themeMode === 'cyberpunk' ? 'text-cyan-300' : themeMode === 'dark' ? 'text-gray-300' : 'text-gray-600'
+                      }`}>Correct Answer:</Text>
+                      <Text className={`font-medium ${
+                        themeMode === 'cyberpunk' ? 'text-cyan-200' : themeMode === 'dark' ? 'text-gray-100' : 'text-gray-800'
+                      }`}>
+                        {result.correctAnswer}{result.correctAnswerText ? ` — ${result.correctAnswerText}` : ''}
+                      </Text>
                     </View>
                   </View>
                 </View>
@@ -671,6 +724,16 @@ export default function MultipleChoiceTestScreen() {
             </View>
           </View>
         </ScrollView>
+        {/* Navigation confirmation modal */}
+        <SubmitModal
+          visible={showResults && showSubmitModal}
+          onConfirm={() => {
+            setShowSubmitModal(false);
+            router.back();
+          }}
+          onCancel={() => setShowSubmitModal(false)}
+          testName={testResults?.testName || 'Test'}
+        />
       </View>
     );
   }
@@ -693,7 +756,7 @@ export default function MultipleChoiceTestScreen() {
           totalQuestions={questions.length}
           percentage={questions.length > 0 ? Math.round((answers.filter(answer => answer && answer.trim() !== '').length / questions.length) * 100) : 0}
           timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
-          onSubmitTest={handleSubmit}
+          onSubmitTest={() => setShowSubmitModal(true)}
           isSubmitting={isSubmitting}
           canSubmit={answers.filter(answer => answer && answer.trim() !== '').length === questions.length}
         />
@@ -715,7 +778,7 @@ export default function MultipleChoiceTestScreen() {
         <View className="mt-6">
           {themeMode === 'cyberpunk' ? (
             <TouchableOpacity
-              onPress={handleSubmit}
+              onPress={() => setShowSubmitModal(true)}
               disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
               style={{ alignSelf: 'center' }}
             >
@@ -765,12 +828,12 @@ export default function MultipleChoiceTestScreen() {
         )}
       </View>
       </ScrollView>
-      {/* Back to Cabinet Confirmation Modal */}
+      {/* Submit Confirmation Modal */}
       <SubmitModal
         visible={showSubmitModal}
         onConfirm={() => {
           setShowSubmitModal(false);
-          router.back();
+          submitTest();
         }}
         onCancel={() => setShowSubmitModal(false)}
         testName={testData?.test_name || testData?.title || 'Test'}

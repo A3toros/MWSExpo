@@ -35,10 +35,7 @@ class CyberGlitchManagerImpl {
   }
 
   private emit() {
-    // Debug: log current active id to verify rotation
-    if (typeof console !== 'undefined') {
-      console.log('[CyberGlitchManager] activeId =', this.activeId);
-    }
+    // Quiet by default; enable if needed
     for (const l of this.listeners) l(this.activeId);
   }
 

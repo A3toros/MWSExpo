@@ -203,9 +203,10 @@ export default function DashboardScreen() {
       console.log('🎓 Initialized completed tests from AsyncStorage:', Array.from(completed));
       
       try {
+        const cacheBust = Date.now();
         const [testsRes, resultsRes] = await Promise.all([
-          api.get('/api/get-student-active-tests'),
-          api.get('/api/get-student-test-results', { params: { student_id: studentId, limit: 5 } }),
+          api.get('/api/get-student-active-tests', { params: { cb: cacheBust } }),
+          api.get('/api/get-student-test-results', { params: { student_id: studentId, limit: 5, cb: cacheBust } }),
         ]);
         const testsData: ActiveTest[] = testsRes.data?.tests ?? testsRes.data?.data ?? [];
         const rawResults = resultsRes.data?.results ?? resultsRes.data?.data ?? [];

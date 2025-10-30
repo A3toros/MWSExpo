@@ -21,6 +21,7 @@ import DrawingControls from '../../../../src/components/DrawingControls';
 import { convertAndroidDrawingToWebFormat, skiaToKonvaJSON } from '../../../../src/utils/SkiaDrawingToKonvaJSON';
 import { academicCalendarService } from '../../../../src/services/AcademicCalendarService';
 import { SubmitModal } from '../../../../src/components/modals';
+import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 
@@ -902,10 +903,9 @@ export default function DrawingTestScreen() {
 
   if (loading) {
     return (
-      <Animated.View className={`flex-1 ${themeClasses.background} justify-center items-center`} style={loadingAnimatedStyle}>
-        <ActivityIndicator size="large" color={themeMode === 'cyberpunk' ? '#00ffd2' : themeMode === 'dark' ? '#60a5fa' : '#3B82F6'} />
-        <Text className={`text-base ${themeClasses.textSecondary} text-center mt-2`}>Loading test...</Text>
-      </Animated.View>
+      <View className={`flex-1 ${themeClasses.background}`}>
+        <LoadingModal visible={true} message={themeMode === 'cyberpunk' ? 'LOADING…' : 'Loading…'} />
+      </View>
     );
   }
 
@@ -1437,20 +1437,7 @@ export default function DrawingTestScreen() {
       />
 
       {/* Loading Spinner Modal */}
-      {isSubmittingToAPI && (
-        <View className="absolute inset-0 bg-black/50 justify-center items-center z-50">
-          <View className={`rounded-xl p-6 items-center ${
-            themeMode === 'cyberpunk' 
-              ? 'bg-black border-cyan-400/30' 
-              : themeMode === 'dark' 
-              ? 'bg-gray-800 border-gray-600' 
-              : 'bg-white border-gray-200'
-          }`}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
-            <Text className="text-base text-gray-700 mt-3">Submitting drawing...</Text>
-          </View>
-        </View>
-      )}
+      <LoadingModal visible={isSubmittingToAPI} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
     </View>
   );
 }

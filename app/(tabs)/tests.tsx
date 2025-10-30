@@ -1,5 +1,6 @@
 import { FlatList, RefreshControl, View, Text, TouchableOpacity } from 'react-native';
 import { useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { api } from '../../src/services/apiClient';
 import { Link } from 'expo-router';
 
@@ -15,7 +16,7 @@ export default function TestsScreen() {
       console.log('Tests tab: Loading active tests...');
       console.log('Tests tab: Timestamp:', new Date().toISOString());
       
-      const res = await api.get('/api/get-active-tests');
+      const res = await api.get('/api/get-active-tests', { params: { cb: Date.now() } });
       console.log('Tests tab: API response status:', res.status);
       console.log('Tests tab: API response data:', JSON.stringify(res.data, null, 2));
       console.log('Tests tab: Tests array length:', res.data?.tests?.length || 0);
@@ -40,6 +41,12 @@ export default function TestsScreen() {
   useEffect(() => {
     load();
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      load();
+    }, [])
+  );
 
   return (
     <View className="flex-1 bg-gray-50">

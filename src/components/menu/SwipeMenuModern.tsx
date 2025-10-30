@@ -139,6 +139,7 @@ export default function SwipeMenuModern({
               <MenuSection title="Quick Actions" delay={200}>
                 <MenuItem
                   icon="🏠"
+                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/dashboard.png') : undefined}
                   title="Dashboard"
                   subtitle="View your progress"
                   cyberStyle={themeMode === 'cyberpunk'}
@@ -151,6 +152,7 @@ export default function SwipeMenuModern({
                 />
                 <MenuItem
                   icon="📝"
+                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/active-tests.png') : undefined}
                   title="Active Tests"
                   subtitle="Continue your tests"
                   badge={activeTestsCount}
@@ -164,6 +166,7 @@ export default function SwipeMenuModern({
                 />
                 <MenuItem
                   icon="📊"
+                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/results.png') : undefined}
                   title="Results"
                   subtitle="View your scores"
                   cyberStyle={themeMode === 'cyberpunk'}
@@ -180,6 +183,7 @@ export default function SwipeMenuModern({
               <MenuSection title="Account" delay={400}>
                 <MenuItem
                   icon="👤"
+                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/profile.png') : undefined}
                   title="Profile"
                   subtitle="Manage your account"
                   cyberStyle={themeMode === 'cyberpunk'}
@@ -192,6 +196,7 @@ export default function SwipeMenuModern({
                 />
                 <MenuItem
                   icon="⚙️"
+                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/settings.png') : undefined}
                   title="Settings"
                   subtitle="App preferences"
                   cyberStyle={themeMode === 'cyberpunk'}
@@ -208,6 +213,7 @@ export default function SwipeMenuModern({
               <MenuSection title="Support" delay={600}>
                 <MenuItem
                   icon="❓"
+                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/faq.png') : undefined}
                   title="Help & FAQ"
                   subtitle="Get assistance"
                   cyberStyle={themeMode === 'cyberpunk'}
@@ -220,6 +226,7 @@ export default function SwipeMenuModern({
                 />
                 <MenuItem
                   icon="💬"
+                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/feedback.png') : undefined}
                   title="Feedback"
                   subtitle="Share your thoughts"
                   cyberStyle={themeMode === 'cyberpunk'}
@@ -232,6 +239,7 @@ export default function SwipeMenuModern({
                 />
                 <MenuItem
                   icon="ℹ️"
+                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/about.png') : undefined}
                   title="About"
                   subtitle="App information"
                   cyberStyle={themeMode === 'cyberpunk'}

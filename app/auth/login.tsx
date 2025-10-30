@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity, View, Image, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity, View, Image, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, TouchableWithoutFeedback, Keyboard } from 'react-native';
 import { useAppDispatch, useAppSelector } from '../../src/store';
 import { loginFailure, loginStart, loginSuccess } from '../../src/store/slices/authSlice';
 import { api } from '../../src/services/apiClient';
@@ -67,16 +67,17 @@ export default function LoginScreen() {
   };
 
         return (
-          <View style={styles.container}>
+          <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.select({ ios: 64, android: 0 })}>
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
             {/* School Logo */}
             <View style={styles.logoContainer}>
               <Image 
-                source={{ uri: 'https://mathayomwatsing.netlify.app/pics/logo_mws.png' }}
+                source={require('../../assets/images/logo.png')}
                 style={styles.logo}
                 resizeMode="contain"
               />
-              <Text style={styles.schoolName}>โรงเรียนมัธยมวัดสิงห์</Text>
-              <Text style={styles.schoolNameEn}>Mathayomwatsing School</Text>
+
             </View>
 
             {/* Login Form */}
@@ -133,7 +134,9 @@ export default function LoginScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </View>
+            </ScrollView>
+            </TouchableWithoutFeedback>
+          </KeyboardAvoidingView>
         );
 }
 
@@ -144,14 +147,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 40,
   },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
   logoContainer: {
     alignItems: 'center',
     marginBottom: 40,
     marginTop: 20,
   },
   logo: {
-    width: 120,
-    height: 120,
+    width: 224,
+    height: 224,
     marginBottom: 16,
   },
   schoolName: {

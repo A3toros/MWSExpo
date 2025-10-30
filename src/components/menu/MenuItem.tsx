@@ -1,6 +1,6 @@
 /** @jsxImportSource nativewind */
 import React from 'react';
-import { View, Text, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, Image } from 'react-native';
 import CyberpunkButton from '../../vendor/CyberpunkButtonFullWidth';
 import { useOneAtATimeGlitch } from '../../utils/useOneAtATimeGlitch';
 import Animated, { 
@@ -19,6 +19,7 @@ type PaletteKey = 'yellow' | 'cyan' | 'red' | 'blue' | 'green' | 'purple';
 
 interface MenuItemProps {
   icon: string;
+  imageSource?: any;
   title: string;
   subtitle?: string;
   badge?: number;
@@ -43,6 +44,7 @@ const CSS_PALETTE: Record<PaletteKey, string> = {
 
 export const MenuItem: React.FC<MenuItemProps> = ({
   icon,
+  imageSource,
   title,
   subtitle,
   badge,
@@ -184,15 +186,17 @@ export const MenuItem: React.FC<MenuItemProps> = ({
         className="flex-row items-center justify-between"
       >
         <View className="flex-row items-center flex-1">
-          {/* Icon placeholder - you can replace with actual icon component */}
+          {/* Icon or image */}
           <View 
             style={{
               width: 24,
               height: 24,
-              borderRadius: 12,
-              backgroundColor: themeMode === 'cyberpunk' 
-                ? 'rgba(0, 255, 210, 0.2)' 
-                : 'rgba(255, 255, 255, 0.2)',
+              borderRadius: imageSource && themeMode !== 'cyberpunk' ? 0 : 12,
+              backgroundColor: imageSource && themeMode !== 'cyberpunk' 
+                ? 'transparent'
+                : (themeMode === 'cyberpunk' 
+                    ? 'rgba(0, 255, 210, 0.2)' 
+                    : 'rgba(255, 255, 255, 0.2)'),
               marginRight: 12,
               justifyContent: 'center',
               alignItems: 'center',
@@ -207,13 +211,17 @@ export const MenuItem: React.FC<MenuItemProps> = ({
               }),
             }}
           >
-            <Text style={{ 
-              color: themeMode === 'cyberpunk' ? accent : 'white', 
-              fontSize: 12, 
-              fontWeight: '600' 
-            }}>
-              {icon}
-            </Text>
+            {imageSource && themeMode !== 'cyberpunk' ? (
+              <Image source={imageSource} style={{ width: 24, height: 24 }} resizeMode="contain" />
+            ) : (
+              <Text style={{ 
+                color: themeMode === 'cyberpunk' ? accent : 'white', 
+                fontSize: 12, 
+                fontWeight: '600' 
+              }}>
+                {icon}
+              </Text>
+            )}
           </View>
 
           <View className="flex-1">

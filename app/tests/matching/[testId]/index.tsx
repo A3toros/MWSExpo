@@ -2,13 +2,14 @@
 import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity, ScrollView, Alert, Image, Dimensions, AppState } from 'react-native';
-import Svg, { Line, Polygon, G } from 'react-native-svg';
+import Svg, { Line, Polygon, G, Circle } from 'react-native-svg';
 import { DraxProvider, DraxView } from 'react-native-drax';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, getSubmissionMethod } from '../../../../src/services/apiClient';
 import { useAppSelector } from '../../../../src/store';
 import TestHeader from '../../../../src/components/TestHeader';
 import { SubmitModal } from '../../../../src/components/modals';
+import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
@@ -34,6 +35,7 @@ export default function MatchingTestScreen() {
   const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [imageRenderSize, setImageRenderSize] = useState<{ width: number; height: number } | null>(null);
   const imageContainerRef = useRef<View>(null);
+  const [imageOffset, setImageOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [arrows, setArrows] = useState<any[]>([]);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false); // confirms submission
@@ -111,8 +113,23 @@ export default function MatchingTestScreen() {
 
       const test = testResponse.data.data;
       setTestData(test);
-      // Set arrows from test payload (mirror web app)
-      setArrows(Array.isArray(test?.arrows) ? test.arrows : []);
+      // Set arrows from test payload (mirror web app) with robust parsing
+      try {
+        let parsedArrows: any[] = [];
+        if (Array.isArray(test?.arrows)) {
+          parsedArrows = test.arrows;
+        } else if (typeof test?.arrows === 'string') {
+          try {
+            const maybe = JSON.parse(test.arrows);
+            if (Array.isArray(maybe)) parsedArrows = maybe;
+          } catch {}
+        }
+        setArrows(parsedArrows);
+        if (DEBUG_MATCHING) {
+          console.log('Matching RN: arrows parsed', { count: parsedArrows.length });
+          try { console.log('Matching RN: first arrows sample', parsedArrows.slice(0, 2)); } catch {}
+        }
+      } catch {}
       if (DEBUG_MATCHING) {
         console.log('Matching RN: loaded test', {
           id: test?.id,
@@ -124,7 +141,10 @@ export default function MatchingTestScreen() {
       if (test?.image_url) {
         Image.getSize(
           test.image_url,
-          (w, h) => setImageNaturalSize({ width: w, height: h }),
+          (w, h) => {
+            setImageNaturalSize({ width: w, height: h });
+            if (DEBUG_MATCHING) console.log('Matching RN: imageNaturalSize', { width: w, height: h });
+          },
           () => {}
         );
       }
@@ -175,6 +195,17 @@ export default function MatchingTestScreen() {
           setBlocks(processedBlocks);
           setWords(processedBlocks);
           if (DEBUG_MATCHING) console.log('Matching RN: processed blocks(new format)', processedBlocks);
+          // Derive arrows from blocks if not provided at test level
+          try {
+            if (Array.isArray(question.arrows)) {
+              if (arrows.length === 0) setArrows(question.arrows);
+            } else {
+              const derived = processedBlocks
+                .map((b: any) => b.arrow)
+                .filter(Boolean);
+              if (derived.length && arrows.length === 0) setArrows(derived as any[]);
+            }
+          } catch {}
         } else {
           // Legacy flat format - process exactly like web app
           const processedBlocks = questionsData.map((q: any, idx: number) => {
@@ -207,6 +238,13 @@ export default function MatchingTestScreen() {
           setBlocks(processedBlocks);
           setWords(processedBlocks);
           if (DEBUG_MATCHING) console.log('Matching RN: processed blocks(legacy)', processedBlocks);
+          // Derive arrows from legacy questions if present
+          try {
+            const derived = questionsData
+              .map((q: any) => q.arrow)
+              .filter(Boolean);
+            if (derived.length && arrows.length === 0) setArrows(derived as any[]);
+          } catch {}
         }
       }
       
@@ -465,19 +503,24 @@ export default function MatchingTestScreen() {
 
   if (loading) {
     return (
-      <View className="flex-1 justify-center items-center bg-gray-50">
-        <ActivityIndicator size="large" color="#2563eb" />
-        <Text className="mt-4 text-base text-gray-600">Loading test...</Text>
+      <View className={`flex-1 justify-center items-center ${themeClasses.background}`}>
+        <ActivityIndicator size="large" color={themeMode === 'cyberpunk' ? '#00ffff' : themeMode === 'dark' ? '#3b82f6' : '#3B82F6'} />
+        <Text className={`mt-4 text-base text-center ${themeClasses.textSecondary}`}>
+          {themeMode === 'cyberpunk' ? 'LOADING TEST...' : 'Loading test...'}
+        </Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View className="flex-1 justify-center items-center bg-gray-50">
-        <Text className="text-red-500 text-base text-center mb-5">{error}</Text>
-        <TouchableOpacity className="bg-blue-500 px-6 py-3 rounded-lg" onPress={loadTestData}>
-          <Text className="text-white text-base font-semibold">Retry</Text>
+      <View className={`flex-1 justify-center items-center px-4 ${themeClasses.background}`}>
+        <Text className={`text-base text-center mb-5 ${themeMode === 'cyberpunk' ? 'text-red-400' : 'text-red-600'}`}>{error}</Text>
+        <TouchableOpacity 
+          className={`${themeMode === 'cyberpunk' ? 'bg-black border border-cyan-400/30' : themeMode === 'dark' ? 'bg-blue-600' : 'bg-blue-500'} px-6 py-3 rounded-lg`}
+          onPress={loadTestData}
+        >
+          <Text className={`${themeMode === 'cyberpunk' ? 'text-cyan-400 tracking-wider' : 'text-white'} text-base font-semibold`}>{themeMode === 'cyberpunk' ? 'RETRY' : 'Retry'}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -762,8 +805,8 @@ export default function MatchingTestScreen() {
 
   if (!testData || !blocks.length) {
     return (
-      <View className="flex-1 justify-center items-center bg-gray-50">
-        <Text className="text-red-500 text-base">No test data available</Text>
+      <View className={`flex-1 justify-center items-center px-4 ${themeClasses.background}`}>
+        <Text className={`text-base text-center ${themeMode === 'cyberpunk' ? 'text-red-400' : 'text-red-600'}`}>No test data available</Text>
       </View>
     );
   }
@@ -795,35 +838,18 @@ export default function MatchingTestScreen() {
     if (!coord || !nat || !ren || nat.width === 0 || nat.height === 0) {
       return { left: 0, top: 0, width: 0, height: 0 };
     }
-    
-    // Calculate scale exactly like web app
+    // Backup logic: scale natural-space rect directly into render-space, no centering offsets
+    const natX = parseCoord(coord.x, nat.width);
+    const natY = parseCoord(coord.y, nat.height);
+    const natW = parseCoord(coord.width, nat.width);
+    const natH = parseCoord(coord.height, nat.height);
     const scaleX = ren.width / nat.width;
     const scaleY = ren.height / nat.height;
-    const scale = Math.min(scaleX, scaleY, 1); // Don't scale up
-    
-    // Calculate image position (centered in container with padding)
-    const scaledWidth = nat.width * scale;
-    const scaledHeight = nat.height * scale;
-    const imageX = (ren.width - scaledWidth) / 2;
-    const imageY = (ren.height - scaledHeight) / 2;
-    
-    // Parse coordinates (support percentage values)
-    const origX = parseCoord(coord.x, nat.width);
-    const origY = parseCoord(coord.y, nat.height);
-    const origW = parseCoord(coord.width, nat.width);
-    const origH = parseCoord(coord.height, nat.height);
-    
-    // Apply web app formula: imageOffset + (originalCoords * scale)
-    const x = imageX + (origX * scale);
-    const y = imageY + (origY * scale);
-    const width = origW * scale;
-    const height = origH * scale;
-
     return {
-      left: x,
-      top: y,
-      width: width,
-      height: height,
+      left: natX * scaleX,
+      top: natY * scaleY,
+      width: natW * scaleX,
+      height: natH * scaleY,
     };
   };
 
@@ -837,59 +863,53 @@ export default function MatchingTestScreen() {
     const nat = imageNaturalSize;
     if (!ren) return null;
 
-    // Default style
     const color = arrow?.style?.color || '#dc3545';
     const thickness = arrow?.style?.thickness || 3;
 
     let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
 
-    // Calculate scale and image position exactly like web app
-    const scaleX = ren.width / (nat?.width || 1);
-    const scaleY = ren.height / (nat?.height || 1);
-    const scale = Math.min(scaleX, scaleY, 1);
-    
-    const scaledWidth = (nat?.width || 1) * scale;
-    const scaledHeight = (nat?.height || 1) * scale;
-    const imageX = (ren.width - scaledWidth) / 2;
-    const imageY = (ren.height - scaledHeight) / 2;
-
     const hasRel = arrow?.rel_start_x != null && arrow?.rel_start_y != null && arrow?.rel_end_x != null && arrow?.rel_end_y != null;
-    const hasOrigDims = arrow?.image_width && arrow?.image_height;
+    const hasStartEndScalars = (arrow?.start_x != null && arrow?.start_y != null && arrow?.end_x != null && arrow?.end_y != null);
 
     if (hasRel) {
-      // Percent-based relative coordinates (exactly like web app)
-      const origW = arrow.image_width;
-      const origH = arrow.image_height;
-      const arrowScaleX = scaledWidth / origW;
-      const arrowScaleY = scaledHeight / origH;
-      x1 = imageX + (toNum(arrow.rel_start_x) / 100) * origW * arrowScaleX;
-      y1 = imageY + (toNum(arrow.rel_start_y) / 100) * origH * arrowScaleY;
-      x2 = imageX + (toNum(arrow.rel_end_x) / 100) * origW * arrowScaleX;
-      y2 = imageY + (toNum(arrow.rel_end_y) / 100) * origH * arrowScaleY;
+      // Percent-based to render size (backup logic)
+      x1 = (toNum(arrow.rel_start_x) / 100) * ren.width;
+      y1 = (toNum(arrow.rel_start_y) / 100) * ren.height;
+      x2 = (toNum(arrow.rel_end_x) / 100) * ren.width;
+      y2 = (toNum(arrow.rel_end_y) / 100) * ren.height;
+    } else if (hasStartEndScalars) {
+      const sx = toNum(arrow.start_x);
+      const sy = toNum(arrow.start_y);
+      const ex = toNum(arrow.end_x);
+      const ey = toNum(arrow.end_y);
+      if (nat?.width && nat?.height) {
+        const scaleX = ren.width / nat.width;
+        const scaleY = ren.height / nat.height;
+        const alreadyRenderSpace = sx <= ren.width + 1 && ex <= ren.width + 1 && sy <= ren.height + 1 && ey <= ren.height + 1;
+        if (alreadyRenderSpace) {
+          x1 = sx; y1 = sy; x2 = ex; y2 = ey;
+        } else {
+          x1 = sx * scaleX; y1 = sy * scaleY; x2 = ex * scaleX; y2 = ey * scaleY;
+        }
+      } else {
+        x1 = sx; y1 = sy; x2 = ex; y2 = ey;
+      }
     } else if (arrow?.start && arrow?.end) {
-      // Absolute coordinates (exactly like web app)
       const sx = toNum(arrow.start.x);
       const sy = toNum(arrow.start.y);
       const ex = toNum(arrow.end.x);
       const ey = toNum(arrow.end.y);
-
-      const inCanvasSpace = (
-        sx <= ren.width + 1 && ex <= ren.width + 1 &&
-        sy <= ren.height + 1 && ey <= ren.height + 1
-      );
-
-      if (inCanvasSpace) {
-        // Coordinates are already in canvas space → just add image offset
-        x1 = imageX + sx;
-        y1 = imageY + sy;
-        x2 = imageX + ex;
-        y2 = imageY + ey;
+      if (nat?.width && nat?.height) {
+        const scaleX = ren.width / nat.width;
+        const scaleY = ren.height / nat.height;
+        const alreadyRenderSpace = sx <= ren.width + 1 && ex <= ren.width + 1 && sy <= ren.height + 1 && ey <= ren.height + 1;
+        if (alreadyRenderSpace) {
+          x1 = sx; y1 = sy; x2 = ex; y2 = ey;
+        } else {
+          x1 = sx * scaleX; y1 = sy * scaleY; x2 = ex * scaleX; y2 = ey * scaleY;
+        }
       } else {
-        // Coordinates are in original image space → apply scale + add image offset
-        x1 = imageX + (sx * scale);
-        y1 = imageY + (sy * scale);
-        x2 = imageX + (ex * scale);
-        y2 = imageY + (ey * scale);
+        x1 = sx; y1 = sy; x2 = ex; y2 = ey;
       }
     } else {
       return null;
@@ -941,7 +961,7 @@ export default function MatchingTestScreen() {
                 ? 'bg-gray-800 border-gray-600' 
                 : 'bg-white border-gray-200'
             }`}
-            style={{ padding: 8 }}
+            style={{ padding: 0 }}
           >
             <Image
               source={{ uri: testData.image_url }}
@@ -954,9 +974,10 @@ export default function MatchingTestScreen() {
               }}
               onLoad={() => setImageLoaded(true)}
               onLayout={(e) => {
-                const { width, height } = e.nativeEvent.layout;
+                const { width, height, x, y } = e.nativeEvent.layout;
                 setImageRenderSize({ width, height });
-                if (DEBUG_MATCHING) console.log('Matching RN: imageRenderSize', { width, height });
+                setImageOffset({ x, y });
+                if (DEBUG_MATCHING) console.log('Matching RN: imageRenderSize', { width, height, x, y });
               }}
               onError={() => setError('Failed to load test image')}
             />
@@ -1016,8 +1037,8 @@ export default function MatchingTestScreen() {
                     {isPlaced && (
                       <Text style={{
                         fontSize: 12,
-                        fontWeight: '600',
-                        color: '#2c3e50',
+                        fontWeight: '700',
+                        color: themeMode === 'cyberpunk' ? '#E0FFFF' : (themeMode === 'dark' ? '#FFFFFF' : '#111827'),
                         textAlign: 'center',
                         position: 'absolute',
                         top: '50%',
@@ -1037,34 +1058,74 @@ export default function MatchingTestScreen() {
             })}
 
             {/* Render arrows overlay using SVG */}
-            {imageRenderSize && arrows.length > 0 && (
+            {imageRenderSize && (
               <Svg
                 pointerEvents="none"
-                style={{ position: 'absolute', left: 0, top: 0 }}
+                style={{ position: 'absolute', left: 0, top: 0, zIndex: 2 }}
                 width={imageRenderSize.width}
                 height={imageRenderSize.height}
                 viewBox={`0 0 ${imageRenderSize.width} ${imageRenderSize.height}`}
               >
-                {arrows.map((arrow, idx) => {
+                {/* Debug guide line to verify overlay renders */}
+                {/* Debug diagonals removed */}
+                {DEBUG_MATCHING ? (() => { try { console.log('Matching RN: drawing arrows overlay', { width: imageRenderSize.width, height: imageRenderSize.height, arrows: (arrows||[]).length }); } catch {}; return null; })() : null}
+                {(() => {
+                  let currentArrows: any[] = Array.isArray(arrows) && arrows.length ? arrows : [];
+                  if (!currentArrows.length) {
+                    try {
+                      if (Array.isArray(testData?.arrows)) currentArrows = testData.arrows;
+                      else if (typeof testData?.arrows === 'string') {
+                        const maybe = JSON.parse(testData.arrows);
+                        if (Array.isArray(maybe)) currentArrows = maybe;
+                      }
+                    } catch {}
+                  }
+                  if (DEBUG_MATCHING) {
+                    try { console.log('Matching RN: using arrows for render', { count: currentArrows.length }); } catch {}
+                  }
+                  return currentArrows;
+                })().map((arrow, idx) => {
                   const pts = getArrowPoints(arrow);
-                  if (!pts) return null;
-                  const head = getArrowHeadPoints(pts.x1, pts.y1, pts.x2, pts.y2, 10, 10);
-                  return (
-                    <G key={`arrow-group-${idx}`}>
-                      <Line
-                        x1={pts.x1}
-                        y1={pts.y1}
-                        x2={pts.x2}
-                        y2={pts.y2}
-                        stroke={pts.color}
-                        strokeWidth={pts.thickness}
-                      />
-                      <Polygon
-                        points={head}
-                        fill={pts.color}
-                      />
-                    </G>
-                  );
+                  if (DEBUG_MATCHING && idx === 0) {
+                    try { console.log('Matching RN: first arrow mapped points', pts); } catch {}
+                  }
+                  if (pts) {
+                    const head = getArrowHeadPoints(pts.x1, pts.y1, pts.x2, pts.y2, 10, 10);
+                    return (
+                      <G key={`arrow-group-${idx}`}>
+                        <Line x1={pts.x1} y1={pts.y1} x2={pts.x2} y2={pts.y2} stroke={pts.color} strokeWidth={pts.thickness} strokeOpacity={1} />
+                        <Polygon points={head} fill={pts.color} />
+                        <Circle cx={pts.x1} cy={pts.y1} r={3} fill={pts.color} />
+                        <Circle cx={pts.x2} cy={pts.y2} r={3} fill={pts.color} />
+                      </G>
+                    );
+                  }
+                  // Fallback: draw magenta using raw coords scaled by natural->render size
+                  const sx = Number(arrow?.start_x ?? arrow?.start?.x);
+                  const sy = Number(arrow?.start_y ?? arrow?.start?.y);
+                  const ex = Number(arrow?.end_x ?? arrow?.end?.x);
+                  const ey = Number(arrow?.end_y ?? arrow?.end?.y);
+                  if (
+                    imageNaturalSize &&
+                    [sx, sy, ex, ey].every(v => typeof v === 'number' && !isNaN(v))
+                  ) {
+                    const x1 = (sx / imageNaturalSize.width) * imageRenderSize.width;
+                    const y1 = (sy / imageNaturalSize.height) * imageRenderSize.height;
+                    const x2 = (ex / imageNaturalSize.width) * imageRenderSize.width;
+                    const y2 = (ey / imageNaturalSize.height) * imageRenderSize.height;
+                    if (DEBUG_MATCHING && idx === 0) {
+                      try { console.log('Matching RN: fallback points', { x1, y1, x2, y2 }); } catch {}
+                    }
+                    return (
+                      <G key={`arrow-fallback-${idx}`}>
+                        <Line x1={x1} y1={y1} x2={x2} y2={y2} stroke={'#ff00ff'} strokeWidth={3} strokeOpacity={1} />
+                        <Circle cx={x1} cy={y1} r={3} fill={'#ff00ff'} />
+                        <Circle cx={x2} cy={y2} r={3} fill={'#ff00ff'} />
+                      </G>
+                    );
+                  }
+                  if (DEBUG_MATCHING) console.log('Matching RN: arrow ignored (no usable coords)', arrow);
+                  return null;
                 })}
               </Svg>
             )}
@@ -1125,7 +1186,9 @@ export default function MatchingTestScreen() {
                     transform: [{ scale: 1.0 }],
                   }}
                 >
-                  <Text className="text-base text-gray-700 font-semibold">{word.word}</Text>
+                  <Text className={`text-base font-semibold ${
+                    themeMode === 'cyberpunk' ? 'text-cyan-200' : (themeMode === 'dark' ? 'text-white' : 'text-gray-900')
+                  }`}>{word.word}</Text>
                 </DraxView>
               );
             })}
@@ -1209,6 +1272,8 @@ export default function MatchingTestScreen() {
         onCancel={() => setShowSubmitModal(false)}
         testName={testData?.test_name || 'Test'}
       />
+
+      <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
 
       {/* No back modal; navigate directly */}
     </View>

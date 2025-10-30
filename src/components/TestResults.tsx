@@ -68,6 +68,15 @@ export default function TestResults({
       qaCount: testResults?.questionAnalysis?.length,
       firstQA: testResults?.questionAnalysis?.[0]
     });
+    if (testResults?.testType === 'word_matching' && Array.isArray(testResults?.questionAnalysis)) {
+      const wm = testResults.questionAnalysis.map((q) => ({
+        questionNumber: q.questionNumber,
+        userAnswer: q.userAnswer,
+        correctAnswer: q.correctAnswer,
+        isCorrect: q.isCorrect
+      }));
+      console.log('🧩 Word-matching TestResults questionAnalysis:', wm);
+    }
   } catch {}
   if (!testResults || !testResults.showResults) {
     return (

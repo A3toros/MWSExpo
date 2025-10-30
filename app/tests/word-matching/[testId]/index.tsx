@@ -10,6 +10,7 @@ import { academicCalendarService } from '../../../../src/services/AcademicCalend
 import { useAppSelector } from '../../../../src/store';
 import TestHeader from '../../../../src/components/TestHeader';
 import { SubmitModal } from '../../../../src/components/modals';
+import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
@@ -25,6 +26,7 @@ export default function WordMatchingTestScreen() {
   const [error, setError] = useState<string | null>(null);
   const [testData, setTestData] = useState<any>(null);
   const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [correctMap, setCorrectMap] = useState<Record<number, number>>({});
   const [testResults, setTestResults] = useState<any>(null);
   const [showResults, setShowResults] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,6 +35,26 @@ export default function WordMatchingTestScreen() {
   const [rightLayouts, setRightLayouts] = useState<Record<number, { x: number; y: number; w: number; h: number }>>({});
   const [showResetModal, setShowResetModal] = useState(false);
   const [isSubmittingToAPI, setIsSubmittingToAPI] = useState(false);
+  const [leftOrder, setLeftOrder] = useState<number[] | null>(null);
+  const [rightOrder, setRightOrder] = useState<number[] | null>(null);
+
+  // Decide correctness for a left->right selection.
+  const isSelectionCorrect = useCallback((leftIndex: number, rightIndex: number | undefined | null) => {
+    if (rightIndex === undefined || rightIndex === null) return false;
+    if (correctMap && typeof correctMap[leftIndex] === 'number') {
+      return correctMap[leftIndex] === rightIndex;
+    }
+    const pairs = (testData as any)?.correctPairs as Array<{ leftIndex: number; rightIndex: number }> | undefined;
+    const answerMap = (testData as any)?.answerMap as Record<number, number> | undefined;
+    if (Array.isArray(pairs) && pairs.length > 0) {
+      return pairs.some(p => p.leftIndex === leftIndex && p.rightIndex === rightIndex);
+    }
+    if (answerMap && typeof answerMap === 'object') {
+      return answerMap[leftIndex] === rightIndex;
+    }
+    // Fallback: index-aligned pairs are considered correct
+    return leftIndex === rightIndex;
+  }, [testData, correctMap]);
 
   // Check if test is already completed (web app pattern)
   const checkTestCompleted = useCallback(async () => {
@@ -118,7 +140,68 @@ export default function WordMatchingTestScreen() {
       }
 
       const test = response.data.data;
-      setTestData(test);
+      // Normalize correctPairs to array like web (object or array)
+      let baseCorrectPairs: number[] | null = Array.isArray(test?.correctPairs)
+        ? (test.correctPairs as number[])
+        : (test?.correctPairs && typeof test.correctPairs === 'object')
+          ? Object.keys(test.correctPairs)
+              .map(k => [Number(k), (test.correctPairs as any)[k]])
+              .sort((a, b) => (a[0] as number) - (b[0] as number))
+              .map(([, v]) => v as number)
+          : null;
+
+      // If API provides pairs and word lists, shuffle both columns and remap pairs exactly like web
+      if (Array.isArray(test?.leftWords) && Array.isArray(test?.rightWords) && Array.isArray(baseCorrectPairs)) {
+        // Build index arrays
+        const rightIndices = test.rightWords.map((_: any, idx: number) => idx);
+        const leftIndices = test.leftWords.map((_: any, idx: number) => idx);
+        // Fisher–Yates shuffle both
+        for (let i = rightIndices.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [rightIndices[i], rightIndices[j]] = [rightIndices[j], rightIndices[i]];
+        }
+        for (let i = leftIndices.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [leftIndices[i], leftIndices[j]] = [leftIndices[j], leftIndices[i]];
+        }
+        const shuffledRight = rightIndices.map((i: number) => test.rightWords[i]);
+        const shuffledLeft = leftIndices.map((i: number) => test.leftWords[i]);
+        const rightNewIndexOf = new Map<number, number>(rightIndices.map((oldIdx: number, newIdx: number) => [oldIdx, newIdx] as [number, number]));
+        // Remap: for each new left index (which corresponds to oldLeftIdx), map to new right index
+        const remappedPairsArray = leftIndices.map((oldLeftIdx: number) => rightNewIndexOf.get(baseCorrectPairs![oldLeftIdx]) as number);
+        const remapped: Record<number, number> = {};
+        remappedPairsArray.forEach((newRightIdx: number, newLeftIdx: number) => {
+          if (typeof newRightIdx === 'number') remapped[newLeftIdx] = newRightIdx;
+        });
+        setCorrectMap(remapped);
+        setTestData({ ...test, leftWords: shuffledLeft, rightWords: shuffledRight, correctPairs: undefined });
+        console.log('🧩 Initialized shuffle (web parity) and remapped map:', { leftIndices, rightIndices, remapped });
+      } else {
+        setTestData(test);
+      }
+      // Derive correctMap from explicit pairs (text) if provided by API
+      try {
+        const pairs = (test?.pairs || test?.questions || []) as Array<{ left?: string; right?: string; left_word?: string; right_word?: string }>;
+        const leftList: string[] = Array.isArray(test?.leftWords) ? test.leftWords : pairs.map(p => (p.left ?? p.left_word ?? ''));
+        const rightList: string[] = Array.isArray(test?.rightWords) ? test.rightWords : pairs.map(p => (p.right ?? p.right_word ?? ''));
+        if (Array.isArray(pairs) && pairs.length > 0 && leftList.length > 0 && rightList.length > 0) {
+          const norm = (s: any) => String(s ?? '').trim().toLowerCase();
+          const map: Record<number, number> = {};
+          leftList.forEach((lw, li) => {
+            const pair = pairs.find(p => norm(p.left ?? p.left_word) === norm(lw));
+            if (pair) {
+              const rText = norm(pair.right ?? pair.right_word);
+              const rIndex = rightList.findIndex(r => norm(r) === rText);
+              if (rIndex >= 0) map[li] = rIndex;
+            }
+          });
+          // Only use this derivation if we didn't set from indices already
+          setCorrectMap(prev => (Object.keys(prev).length ? prev : map));
+          if (!Object.keys(correctMap).length) console.log('🧩 Derived correctMap from pairs:', map);
+        } else {
+          // No explicit text pairs; do not second-guess backend here. Leave order as-is and keep existing correctMap.
+        }
+      } catch {}
       
     } catch (e: any) {
       console.error('Failed to load word matching test:', e?.message);
@@ -189,17 +272,34 @@ export default function WordMatchingTestScreen() {
       }
       
       console.log('📅 Current academic period ID:', academic_period_id);
+      console.log('🧩 Answers map before submit:', answers);
+      if (Object.keys(correctMap).length > 0) console.log('🧩 Using correctMap:', correctMap);
+      if (testData?.leftWords && testData?.rightWords) {
+        const preview = (testData.leftWords as string[]).map((lw: string, i: number) => {
+          const ri = answers[i];
+          const rw = ri !== undefined ? testData.rightWords[ri] : null;
+          const isOk = correctMap && typeof correctMap[i] === 'number'
+            ? ri === correctMap[i]
+            : isSelectionCorrect(i, ri);
+          return { leftIndex: i, leftWord: lw, rightIndex: ri, rightWord: rw, isCorrect: isOk };
+        });
+        console.log('🧩 Word-matching preview:', preview);
+      }
 
-      // Calculate score based on correct matches
+      // Calculate score based on correct matches (mirror web: compare to correctPairs when present)
       let correctMatches = 0;
       if (testData.leftWords && testData.rightWords) {
-        Object.entries(answers).forEach(([leftIndex, rightIndex]) => {
-          const leftWord = testData.leftWords[parseInt(leftIndex)];
-          const rightWord = testData.rightWords[rightIndex];
-          if (leftWord === rightWord) {
-            correctMatches++;
-          }
-        });
+        if (correctMap && Object.keys(correctMap).length) {
+          Object.keys(correctMap).forEach(k => {
+            const li = parseInt(k);
+            if (answers[li] === correctMap[li]) correctMatches++;
+          });
+        } else {
+          Object.entries(answers).forEach(([leftIndexStr, rightIndex]) => {
+            const li = parseInt(leftIndexStr);
+            if (isSelectionCorrect(li, rightIndex as number)) correctMatches++;
+          });
+        }
       }
 
       const submissionData = {
@@ -224,6 +324,7 @@ export default function WordMatchingTestScreen() {
 
       const submitMethod = getSubmissionMethod('word_matching');
       const response = await submitMethod(submissionData);
+      console.log('🧩 Submission response:', response?.data);
       
       if (response.data.success) {
         // Mark test as completed (web app pattern)
@@ -274,19 +375,21 @@ export default function WordMatchingTestScreen() {
 
   if (loading) {
     return (
-      <View className="flex-1 bg-gray-50 justify-center items-center">
-        <ActivityIndicator size="large" color="#2563eb" />
-        <Text className="text-base text-gray-500 text-center mt-2">Loading test...</Text>
+      <View className={`flex-1 ${themeClasses.background}`}>
+        <LoadingModal visible={true} message={themeMode === 'cyberpunk' ? 'LOADING…' : 'Loading…'} />
       </View>
     );
   }
 
   if (error) {
     return (
-      <View className="flex-1 bg-gray-50 justify-center items-center px-4">
-        <Text className="text-base text-red-600 text-center mb-4">{error}</Text>
-        <TouchableOpacity className="bg-[#8B5CF6] py-3 px-6 rounded-lg" onPress={loadTestData}>
-          <Text className="text-white text-center font-semibold">Retry</Text>
+      <View className={`flex-1 ${themeClasses.background} justify-center items-center px-4`}>
+        <Text className={`text-base text-center mb-4 ${themeMode === 'cyberpunk' ? 'text-red-400' : themeMode === 'dark' ? 'text-red-300' : 'text-red-600'}`}>{error}</Text>
+        <TouchableOpacity 
+          className={`${themeMode === 'cyberpunk' ? 'bg-black border border-cyan-400/30' : themeMode === 'dark' ? 'bg-blue-600' : 'bg-header-blue'} py-3 px-6 rounded-lg`}
+          onPress={loadTestData}
+        >
+          <Text className={`${themeMode === 'cyberpunk' ? 'text-cyan-400 tracking-wider' : 'text-white'} text-center font-semibold`}> {themeMode === 'cyberpunk' ? 'RETRY' : 'Retry'}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -335,6 +438,17 @@ export default function WordMatchingTestScreen() {
               </View>
 
               {/* Question Review */}
+              {(() => {
+                try {
+                  const review = testData.leftWords?.map((leftWord: string, index: number) => {
+                    const rightIndex = answers[index];
+                    const rightWord = rightIndex !== undefined ? testData.rightWords[rightIndex] : null;
+                    return { index, leftWord, rightIndex, rightWord, isCorrect: isSelectionCorrect(index, rightIndex) };
+                  }) || [];
+                  console.log('🧩 Word-matching results review:', review);
+                } catch {}
+                return null;
+              })()}
               <View className="mb-4">
                 <Text className={`text-lg font-bold mb-3 ${
                   themeMode === 'cyberpunk' ? 'text-cyan-400 tracking-wider' : themeMode === 'dark' ? 'text-white' : 'text-gray-800'
@@ -345,7 +459,7 @@ export default function WordMatchingTestScreen() {
                 {testData.leftWords?.map((leftWord: string, index: number) => {
                   const rightIndex = answers[index];
                   const rightWord = rightIndex !== undefined ? testData.rightWords[rightIndex] : null;
-                  const isCorrect = leftWord === rightWord;
+                  const isCorrect = isSelectionCorrect(index, rightIndex);
                   
                   return (
                     <View key={index} className={`p-4 rounded-lg mb-3 border-2 ${
@@ -427,10 +541,9 @@ export default function WordMatchingTestScreen() {
                     <Text className={`text-xl font-bold mb-1 ${
                       themeMode === 'cyberpunk' ? 'text-green-400' : themeMode === 'dark' ? 'text-green-300' : 'text-green-600'
                     }`}>
-                      {testData.leftWords?.filter((leftWord: string, index: number) => {
+                      {testData.leftWords?.filter((_: string, index: number) => {
                         const rightIndex = answers[index];
-                        const rightWord = rightIndex !== undefined ? testData.rightWords[rightIndex] : null;
-                        return leftWord === rightWord;
+                        return isSelectionCorrect(index, rightIndex);
                       }).length || 0}
                     </Text>
                     <Text className={`text-xs ${
@@ -445,10 +558,9 @@ export default function WordMatchingTestScreen() {
                     <Text className={`text-xl font-bold mb-1 ${
                       themeMode === 'cyberpunk' ? 'text-red-400' : themeMode === 'dark' ? 'text-red-300' : 'text-red-600'
                     }`}>
-                      {testData.leftWords?.filter((leftWord: string, index: number) => {
+                      {testData.leftWords?.filter((_: string, index: number) => {
                         const rightIndex = answers[index];
-                        const rightWord = rightIndex !== undefined ? testData.rightWords[rightIndex] : null;
-                        return leftWord !== rightWord;
+                        return !isSelectionCorrect(index, rightIndex);
                       }).length || 0}
                     </Text>
                     <Text className={`text-xs ${
@@ -516,8 +628,8 @@ export default function WordMatchingTestScreen() {
 
   if (!testData || !testData.leftWords || !testData.rightWords) {
     return (
-      <View className="flex-1 bg-gray-50 justify-center items-center px-4">
-        <Text className="text-base text-red-600 text-center">No test data available</Text>
+      <View className={`flex-1 ${themeClasses.background} justify-center items-center px-4`}>
+        <Text className={`text-base text-center ${themeMode === 'cyberpunk' ? 'text-cyan-400' : themeMode === 'dark' ? 'text-gray-200' : 'text-gray-700'}`}>{themeMode === 'cyberpunk' ? 'NO TEST DATA' : 'No test data available'}</Text>
       </View>
     );
   }
@@ -757,21 +869,7 @@ export default function WordMatchingTestScreen() {
       />
 
       {/* API Submission Loading Modal */}
-      {isSubmittingToAPI && (
-        <View className="absolute inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
-          <View className={`rounded-xl p-6 items-center ${
-            themeMode === 'cyberpunk' 
-              ? 'bg-black border-cyan-400/30' 
-              : themeMode === 'dark' 
-              ? 'bg-gray-800 border-gray-600' 
-              : 'bg-white border-gray-200'
-          }`}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
-            <Text className="text-lg font-semibold text-gray-800 mt-4">Submitting Test...</Text>
-            <Text className="text-sm text-gray-600 mt-2 text-center">Please wait while we process your answers</Text>
-          </View>
-        </View>
-      )}
+      <LoadingModal visible={isSubmittingToAPI} message="Submitting Test..." showSpinner={true} />
     </View>
   );
 }

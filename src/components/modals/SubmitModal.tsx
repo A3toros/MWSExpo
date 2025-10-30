@@ -23,6 +23,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
 }) => {
   const { themeMode } = useTheme();
   const modalStyles = getModalStyles(themeMode);
+  const isCyberpunk = themeMode === 'cyberpunk';
 
 
   const getButtonClasses = (isPrimary: boolean) => {
@@ -53,8 +54,8 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
       transparent={true}
       animationType="fade"
     >
-      <View className={modalStyles.overlay}>
-        <View className={modalStyles.container}>
+      <View className={`${modalStyles.overlay} flex-1 justify-center items-center`}>
+        <View className={`${modalStyles.container} w-11/12 max-w-xl` }>
           <Text className={`${modalStyles.title} text-center`}>
             Submit {testName}?
           </Text>
@@ -69,16 +70,25 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
             Are you sure you want to submit your answers? This action cannot be undone.
           </Text>
           
-          <View className="flex-row gap-4 px-4 pt-4 pb-4">
-            <>
+          {isCyberpunk ? (
+            <View className="flex-row justify-center items-center gap-4 px-4 pt-6 pb-2">
+              <View className="w-36">
+                <ThemedButton title="Cancel" onPress={onCancel} />
+              </View>
+              <View className="w-36">
+                <ThemedButton title="Submit" onPress={onConfirm} variant="modal" />
+              </View>
+            </View>
+          ) : (
+            <View className="flex-row gap-4 px-4 pt-4 pb-4">
               <View className="flex-1">
                 <ThemedButton title="Cancel" onPress={onCancel} />
               </View>
               <View className="flex-1">
                 <ThemedButton title="Submit" onPress={onConfirm} variant="modal" />
               </View>
-            </>
-          </View>
+            </View>
+          )}
         </View>
       </View>
     </Modal>

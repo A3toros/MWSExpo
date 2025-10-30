@@ -1,0 +1,7 @@
+cd MWSExpo
+npx expo prebuild -p android --clean
+cd android
+.\gradlew clean
+cd ..
+npx expo start -c
+npx expo run:android

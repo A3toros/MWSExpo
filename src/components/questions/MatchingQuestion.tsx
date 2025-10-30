@@ -1,6 +1,7 @@
 /** @jsxImportSource nativewind */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Image, Alert } from 'react-native';
+import Svg, { Line, Defs, Marker, Path } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses } from '../../utils/themeUtils';
@@ -47,6 +48,13 @@ export default function MatchingQuestion({
   const [placedWords, setPlacedWords] = useState<{[key: string]: string}>({});
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
+
+  // Layout tracking for drawing arrows
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [imageOffset, setImageOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [wordBankOffset, setWordBankOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const blockCentersRef = useRef<Record<string, { x: number; y: number }>>({});
+  const wordCentersRef = useRef<Record<string, { x: number; y: number }>>({});
 
   // Initialize question data
   useEffect(() => {
@@ -187,7 +195,12 @@ export default function MatchingQuestion({
       </Text>
       
       {question.image_url && (
-        <View style={styles.imageContainer}>
+        <View style={styles.imageContainer} onLayout={(e) => {
+          setImageOffset({ x: e.nativeEvent.layout.x, y: e.nativeEvent.layout.y });
+          // container for arrows sizing
+          const { width, height } = e.nativeEvent.layout;
+          setContainerSize((prev) => ({ width: Math.max(prev.width, width), height: prev.height + height }));
+        }}>
           <Image 
             source={{ uri: question.image_url }} 
             style={styles.image}
@@ -207,17 +220,29 @@ export default function MatchingQuestion({
                 }
               ]}
               onPress={() => handleBlockTap(block.id)}
+              onLayout={(e) => {
+                const { x, y, width, height } = e.nativeEvent.layout;
+                blockCentersRef.current[String(block.id)] = {
+                  x: imageOffset.x + x + (width / 2),
+                  y: imageOffset.y + y + (height / 2),
+                };
+              }}
             >
               <Text style={styles.blockText}>
                 {placedWords[String(block.id)] || 'Tap to place word'}
               </Text>
             </TouchableOpacity>
           ))}
+          {/* Arrows overlay for placed words -> blocks (drawn later as global overlay) */}
         </View>
       )}
       
       {/* Word bank */}
-      <View className="mt-4">
+      <View className="mt-4" onLayout={(e) => {
+        setWordBankOffset({ x: e.nativeEvent.layout.x, y: e.nativeEvent.layout.y });
+        const { width, height } = e.nativeEvent.layout;
+        setContainerSize((prev) => ({ width: Math.max(prev.width, width), height: prev.height + height }));
+      }}>
         <Text className={`text-base font-semibold mb-3 ${
           themeMode === 'cyberpunk' 
             ? 'text-cyan-400 tracking-wider' 
@@ -239,6 +264,14 @@ export default function MatchingQuestion({
                   : 'bg-white border-gray-300'
               }`}
               onPress={() => handleWordTap(word.id)}
+              onLayout={(e) => {
+                const { x, y, width, height } = e.nativeEvent.layout;
+                // Use word text as key; assumes distinct texts per question
+                wordCentersRef.current[String(word.text)] = {
+                  x: wordBankOffset.x + x + (width / 2),
+                  y: wordBankOffset.y + y + (height / 2),
+                };
+              }}
             >
               <Text className={`text-base ${
                 themeMode === 'cyberpunk' 
@@ -253,6 +286,39 @@ export default function MatchingQuestion({
           ))}
         </View>
       </View>
+
+      {/* SVG overlay connecting word bank chips to blocks */}
+      {containerSize.width > 0 && containerSize.height > 0 && (
+        <Svg
+          pointerEvents="none"
+          width={containerSize.width}
+          height={containerSize.height}
+          style={{ position: 'absolute', top: 0, left: 0 }}
+        >
+          <Defs>
+            <Marker id="arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto">
+              <Path d="M0,0 L8,4 L0,8 z" fill={themeMode === 'cyberpunk' ? '#00ffd2' : themeMode === 'dark' ? '#60A5FA' : '#2563eb'} />
+            </Marker>
+          </Defs>
+          {Object.entries(placedWords).map(([blockId, wordText]) => {
+            const start = wordCentersRef.current[String(wordText)];
+            const end = blockCentersRef.current[String(blockId)];
+            if (!start || !end) return null;
+            return (
+              <Line
+                key={`${blockId}-${wordText}`}
+                x1={start.x}
+                y1={start.y}
+                x2={end.x}
+                y2={end.y}
+                stroke={themeMode === 'cyberpunk' ? '#00ffd2' : themeMode === 'dark' ? '#60A5FA' : '#2563eb'}
+                strokeWidth={3}
+                markerEnd="url(#arrow)"
+              />
+            );
+          })}
+        </Svg>
+      )}
       
       <View className="mt-4 p-3 rounded-lg border ${
         themeMode === 'cyberpunk' 

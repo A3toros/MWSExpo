@@ -13,6 +13,7 @@ import TestHeader from '../../../../src/components/TestHeader';
 import FillBlanksTestRenderer from '../../../../src/components/questions/fill-blanks/FillBlanksTestRenderer';
 import TestResults from '../../../../src/components/TestResults';
 import { SubmitModal } from '../../../../src/components/modals';
+import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 
@@ -426,33 +427,13 @@ export default function FillBlanksTestScreen() {
     });
   }, [questions]);
 
-  // Submit test
-  const handleSubmit = useCallback(async () => {
-    if (isLoadingUser) {
-      Alert.alert('Please Wait', 'Loading user data...');
+  // Submit test (open custom modal only)
+  const handleSubmit = useCallback(() => {
+    if (isLoadingUser || !user?.student_id || !testData || !questions.length) {
       return;
     }
-    
-    if (!user?.student_id) {
-      Alert.alert('Error', 'User data not loaded. Please try again.');
-      return;
-    }
-    
-    if (!testData || !questions.length) {
-      Alert.alert('Error', `Missing required data for submission:\n- Test Data: ${!!testData}\n- Questions: ${questions.length}`);
-      return;
-    }
-
-    // Show confirmation dialog before submitting
-    Alert.alert(
-      'Submit Test',
-      'Are you sure you want to submit your test? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Submit', style: 'destructive', onPress: () => submitTest() }
-      ]
-    );
-  }, [user?.student_id, testData, questions, answers, testId]);
+    setShowSubmitModal(true);
+  }, [isLoadingUser, user?.student_id, testData, questions.length]);
 
   // Actual submit function
   const submitTest = useCallback(async () => {
@@ -476,12 +457,14 @@ export default function FillBlanksTestScreen() {
 
     try {
       let correctAnswers = 0;
-      questions.forEach((question, index) => {
-        const studentAnswer = answers[index]?.trim().toLowerCase();
-        const correctAnswer = question.correct_answer?.trim()?.toLowerCase() || '';
-        if (studentAnswer === correctAnswer) {
-          correctAnswers++;
-        }
+      const perQuestion = questions.map((question, index) => {
+        const studentAnswerRaw = answers[index] ?? '';
+        const studentAnswer = String(studentAnswerRaw).trim().toLowerCase();
+        const correctFromBlank = question?.blanks && question.blanks[0]?.correct_answer ? String(question.blanks[0].correct_answer) : '';
+        const correctAnswer = (question.correct_answer ?? correctFromBlank ?? '').toString().trim().toLowerCase();
+        const isCorrect = studentAnswer.length > 0 && correctAnswer.length > 0 && studentAnswer === correctAnswer;
+        if (isCorrect) correctAnswers++;
+        return { studentAnswer: studentAnswerRaw, correctAnswer: correctFromBlank || question.correct_answer || '' , isCorrect };
       });
 
       const score = correctAnswers;
@@ -554,25 +537,20 @@ export default function FillBlanksTestScreen() {
           percentage: percentage,
           passed: percentage >= 60,
           questionAnalysis: questions.map((question, index) => {
-            // Get the correct answer from the first blank of this question
-            const correctAnswer = question.blanks && question.blanks[0] ? question.blanks[0].correct_answer : '';
-            const userAnswer = answers[index] || '';
-            const isCorrect = userAnswer.trim().toLowerCase() === correctAnswer.trim().toLowerCase();
-            
+            const qa = perQuestion[index];
             console.log(`🔍 Scoring Debug - Question ${index + 1}:`, {
-              userAnswer,
-              correctAnswer,
-              isCorrect,
+              userAnswer: qa.studentAnswer,
+              correctAnswer: qa.correctAnswer,
+              isCorrect: qa.isCorrect,
               questionBlanks: question.blanks
             });
-            
             return {
               questionNumber: index + 1,
               question: question.question_text || question.question || `Question ${index + 1}`,
-              userAnswer: userAnswer,
-              correctAnswer: correctAnswer,
-              isCorrect: isCorrect,
-              score: isCorrect ? 1 : 0,
+              userAnswer: qa.studentAnswer,
+              correctAnswer: qa.correctAnswer,
+              isCorrect: qa.isCorrect,
+              score: qa.isCorrect ? 1 : 0,
               maxScore: 1
             };
           }),
@@ -672,7 +650,7 @@ export default function FillBlanksTestScreen() {
           totalQuestions={questions.length}
           percentage={questions.length > 0 ? Math.round((answers.filter(answer => answer && answer.trim() !== '').length / questions.length) * 100) : 0}
           timeElapsed={testData?.allowed_time > 0 ? timeElapsed : undefined}
-          onSubmitTest={handleSubmit}
+          onSubmitTest={() => setShowSubmitModal(true)}
           isSubmitting={isSubmitting}
           canSubmit={answers.filter(answer => answer && answer.trim() !== '').length === questions.length}
         />
@@ -731,11 +709,14 @@ export default function FillBlanksTestScreen() {
         visible={showSubmitModal}
         onConfirm={() => {
           setShowSubmitModal(false);
-          handleSubmit();
+          submitTest();
         }}
         onCancel={() => setShowSubmitModal(false)}
         testName={testData?.test_name || 'Test'}
       />
+
+      {/* Submitting overlay */}
+      <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
     </View>
   );
 }
