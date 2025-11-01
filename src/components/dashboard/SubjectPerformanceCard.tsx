@@ -6,6 +6,7 @@ import { getThemeClasses } from '../../utils/themeUtils';
 import { getPerformanceLevel, getPerformanceEmoji } from '../../utils/performanceColors';
 import CircularProgress from './CircularProgress';
 import ProgressBar from './ProgressBar';
+import CyberpunkCircularProgress from './CyberpunkCircularProgress';
 import { SubjectPerformance } from '../../utils/subjectPerformanceCalculator';
 
 interface SubjectPerformanceCardProps {
@@ -86,13 +87,10 @@ export default function SubjectPerformanceCard({
       {/* Progress Visualization */}
       <View className="items-center mb-4">
         {themeMode === 'cyberpunk' ? (
-          <ProgressBar
+          <CyberpunkCircularProgress
             progress={subject.averageScore}
-            width={200}
-            height={24}
-            themeMode={themeMode}
-            showPercentage={true}
-            showGlow={true}
+            size={150}
+            animationDuration={2000}
             shouldAnimate={isActive}
           />
         ) : (

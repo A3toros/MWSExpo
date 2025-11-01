@@ -1,15 +1,16 @@
 /** @jsxImportSource nativewind */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, FlatList, RefreshControl, ScrollView, Dimensions } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses } from '../../utils/themeUtils';
-import { TestResult } from '../../types';
+import { TestResult, LeaderboardEntry } from '../../types';
 import { 
   calculateSubjectPerformance, 
   hasAnyTestResults,
   SubjectPerformance 
 } from '../../utils/subjectPerformanceCalculator';
 import SubjectPerformanceCard from './SubjectPerformanceCard';
+import { leaderboardService } from '../../services/leaderboardService';
 
 interface User {
   student_id: string;
@@ -40,6 +41,8 @@ export default function DashboardView({
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);
   const [activeCardIndex, setActiveCardIndex] = useState(0);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
   const screenWidth = Dimensions.get('window').width;
 
   // Calculate subject performance data
@@ -60,6 +63,43 @@ export default function DashboardView({
     }, 0);
     return Math.round((totalScore / results.length) * 100) / 100;
   }, [results, hasResults]);
+
+  // Fetch leaderboard data
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      if (!user) return;
+      
+      setLoadingLeaderboard(true);
+      try {
+        const data = await leaderboardService.getClassLeaderboard();
+        setLeaderboard(data);
+      } catch (error: any) {
+        console.error('Error fetching leaderboard:', error);
+        // Don't show error to user if it's a 404 (function not deployed yet)
+        // Just silently fail - leaderboard won't be displayed
+        if (error.message?.includes('404')) {
+          console.warn('Leaderboard function not deployed yet. Skipping leaderboard display.');
+        }
+      } finally {
+        setLoadingLeaderboard(false);
+      }
+    };
+
+    fetchLeaderboard();
+  }, [user]);
+
+  // Refresh leaderboard when onRefresh is called
+  const handleRefresh = async () => {
+    onRefresh();
+    if (user) {
+      try {
+        const data = await leaderboardService.getClassLeaderboard();
+        setLeaderboard(data);
+      } catch (error) {
+        console.error('Error fetching leaderboard:', error);
+      }
+    }
+  };
 
   const renderSubjectCard = ({ item, index }: { item: SubjectPerformance; index: number }) => (
     <SubjectPerformanceCard
@@ -168,7 +208,7 @@ export default function DashboardView({
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={onRefresh}
+            onRefresh={handleRefresh}
             tintColor={themeMode === 'cyberpunk' ? '#00ffd2' : undefined}
             colors={themeMode === 'dark' ? ['#8b5cf6'] : undefined}
           />
@@ -207,16 +247,133 @@ export default function DashboardView({
         />
       </View>
 
-        {/* Subject Count Indicator */}
-        <View className="px-4 py-2">
-          <Text className={`text-sm text-center ${
-            themeMode === 'cyberpunk'
-              ? 'text-cyan-300 tracking-wider'
-              : themeClasses.textSecondary
-          }`}>
-            {subjectPerformance.length} {subjectPerformance.length === 1 ? 'subject' : 'subjects'} with test results
-          </Text>
-        </View>
+        
+        {/* Class Leaderboard Section */}
+        {leaderboard.length > 0 && (
+          <View className="px-4 mb-6">
+            <Text className={`text-lg font-bold mb-3 ${
+              themeMode === 'cyberpunk'
+                ? 'text-cyan-400 tracking-wider'
+                : themeClasses.text
+            } text-center`}>
+              {themeMode === 'cyberpunk' ? 'CLASS LEADERBOARD' : 'Class Leaderboard'}
+            </Text>
+            <View className={`rounded-xl p-4 ${
+              themeMode === 'cyberpunk'
+                ? 'bg-gray-900 border border-cyan-400/30'
+                : themeMode === 'dark'
+                ? 'bg-gray-800 border border-gray-600'
+                : 'bg-white border border-gray-200'
+            }`}>
+              {/* Table Headers */}
+              <View className={`flex-row items-center py-2 px-3 mb-2 border-b ${
+                themeMode === 'cyberpunk'
+                  ? 'border-cyan-400/30'
+                  : themeMode === 'dark'
+                  ? 'border-gray-600'
+                  : 'border-gray-200'
+              }`}>
+                <Text className={`text-xs font-bold uppercase tracking-wider mr-3 ${
+                  themeMode === 'cyberpunk'
+                    ? 'text-cyan-400'
+                    : themeClasses.textSecondary
+                }`} style={{ width: 40 }}>
+                  #
+                </Text>
+                <Text className={`text-xs font-bold uppercase tracking-wider flex-1 ${
+                  themeMode === 'cyberpunk'
+                    ? 'text-cyan-400'
+                    : themeClasses.textSecondary
+                }`}>
+                  Nick
+                </Text>
+                <Text className={`text-xs font-bold uppercase tracking-wider mr-3 ${
+                  themeMode === 'cyberpunk'
+                    ? 'text-cyan-400'
+                    : themeClasses.textSecondary
+                }`} style={{ width: 50 }}>
+                  XP
+                </Text>
+                <Text className={`text-xs font-bold uppercase tracking-wider ${
+                  themeMode === 'cyberpunk'
+                    ? 'text-cyan-400'
+                    : themeClasses.textSecondary
+                }`} style={{ flex: 1.5 }}>
+                  Rank
+                </Text>
+              </View>
+              <FlatList
+                data={leaderboard}
+                keyExtractor={(item) => item.number.toString()}
+                scrollEnabled={false}
+                renderItem={({ item }) => (
+                  <View className={`flex-row items-center py-2 px-3 mb-2 rounded-lg ${
+                    item.is_current_student
+                      ? themeMode === 'cyberpunk'
+                        ? 'bg-cyan-500/20 border border-cyan-400'
+                        : themeMode === 'dark'
+                        ? 'bg-blue-900/30 border border-blue-400'
+                        : 'bg-blue-100 border border-blue-300'
+                      : ''
+                  }`}>
+                    <Text className={`text-lg font-semibold mr-3 ${
+                      item.is_current_student
+                        ? themeMode === 'cyberpunk' 
+                          ? 'text-cyan-400' 
+                          : themeMode === 'dark'
+                          ? 'text-blue-400'
+                          : 'text-blue-600'
+                        : themeMode === 'cyberpunk'
+                        ? 'text-cyan-300'
+                        : themeClasses.text
+                    } ${themeMode === 'cyberpunk' ? 'text-[#ff003c]' : ''}`} style={{ width: 40 }}>
+                      {item.number}
+                    </Text>
+                    <Text className={`text-base flex-1 ${
+                      item.is_current_student
+                        ? themeMode === 'cyberpunk' 
+                          ? 'text-cyan-300' 
+                          : themeMode === 'dark'
+                          ? 'text-blue-300'
+                          : 'text-blue-700'
+                        : themeMode === 'cyberpunk'
+                        ? 'text-cyan-200'
+                        : themeClasses.text
+                    }`}>
+                      {item.nickname}
+                    </Text>
+                    <Text className={`text-sm font-semibold mr-3 ${
+                      item.is_current_student
+                        ? themeMode === 'cyberpunk' 
+                          ? 'text-cyan-400' 
+                          : themeMode === 'dark'
+                          ? 'text-blue-400'
+                          : 'text-blue-600'
+                        : themeMode === 'cyberpunk'
+                        ? 'text-cyan-300'
+                        : themeClasses.textSecondary
+                    } ${themeMode === 'cyberpunk' ? 'text-[#f8ef02]' : ''}`} style={{ width: 50 }}>
+                      {item.xp}
+                    </Text>
+                    <Text className={`text-sm font-semibold ${
+                      item.is_current_student
+                        ? themeMode === 'cyberpunk' 
+                          ? 'text-cyan-400' 
+                          : themeMode === 'dark'
+                          ? 'text-blue-400'
+                          : 'text-blue-600'
+                        : themeMode === 'cyberpunk'
+                        ? 'text-cyan-300'
+                        : themeClasses.textSecondary
+                    } ${themeMode === 'cyberpunk' ? 'text-purple-500' : ''}`} style={{ flex: 1.5 }}>
+                      {item.rank_title}
+                    </Text>
+                  </View>
+                )}
+              />
+            </View>
+          </View>
+        )}
       </ScrollView>
 
     </View>

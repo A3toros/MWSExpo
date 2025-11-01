@@ -43,6 +43,10 @@
     --black: #000;
     --white: #fff;
     --dark: #333;
+    /* Leaderboard accents */
+    --leaderboard-accent-red: var(--red);
+    --leaderboard-accent-yellow: var(--yellow);
+    --leaderboard-accent-purple: var(--purple);
 
     --fg: var(--black);
     --bg: transparent;

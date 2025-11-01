@@ -72,4 +72,14 @@ export interface Test {
   total_points?: number;
 }
 
+export interface LeaderboardEntry {
+  number: number;
+  nickname: string;
+  xp: number;
+  max_xp: number;
+  ratio: number;
+  rank_title: string;
+  is_current_student: boolean;
+}
+
 
