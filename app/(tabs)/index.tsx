@@ -23,6 +23,7 @@ import { useAppDispatch, useAppSelector } from '../../src/store';
 import { logout } from '../../src/store/slices/authSlice';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../src/utils/themeUtils';
+import { processRetestAvailability } from '../../src/utils/retestUtils';
 
 type ActiveTest = {
   test_id: number;
@@ -33,6 +34,9 @@ type ActiveTest = {
   assigned_at?: number;
   deadline?: number | null;
   retest_available?: boolean;
+  retest_key?: string;
+  retest_attempts_left?: number | null;
+  retest_assignment_id?: number;
 };
 
 type User = {
@@ -225,6 +229,31 @@ export default function DashboardScreen() {
         }));
         setTests(testsData);
         setResults(resultsData);
+        
+        // Process retest_available flag (web app pattern) using helper
+        try {
+          for (const test of testsData) {
+            if (test.retest_available) {
+              await processRetestAvailability(
+                test,
+                studentId,
+                (testKey, remove) => {
+                  setCompletedTests(prev => {
+                    const updated = new Set(prev);
+                    if (remove) {
+                      updated.delete(testKey);
+                    } else {
+                      updated.add(testKey);
+                    }
+                    return updated;
+                  });
+                }
+              );
+            }
+          }
+        } catch (retestError) {
+          console.warn('Error processing retest keys:', retestError);
+        }
         
         // Update completed tests from API results (web app pattern)
         if (resultsData && resultsData.length > 0) {

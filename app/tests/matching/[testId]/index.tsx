@@ -14,6 +14,7 @@ import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
 import { academicCalendarService } from '../../../../src/services/AcademicCalendarService';
+import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 
 // Using Drax for drag and drop; no custom gesture math needed
 
@@ -386,6 +387,10 @@ export default function MatchingTestScreen() {
         }
       });
       
+      // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
+      const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+      const retestAssignmentId = await getRetestAssignmentId(studentId, 'matching_type', testIdStr);
+      
       const submissionData = {
         test_id: parseInt(testId),
         test_name: testData.test_name,
@@ -401,7 +406,7 @@ export default function MatchingTestScreen() {
         submitted_at: new Date().toISOString(),
         caught_cheating: caughtCheating,
         visibility_change_times: visibilityChangeTimes,
-        retest_assignment_id: null, // TODO: Get from AsyncStorage like web app
+        retest_assignment_id: retestAssignmentId,
         parent_test_id: parseInt(testId)
       };
       if (DEBUG_SUBMIT) console.log('Matching RN: submission payload', submissionData);
@@ -411,22 +416,14 @@ export default function MatchingTestScreen() {
       if (DEBUG_SUBMIT) console.log('Matching RN: submission response', response?.data);
       
       if (response.data.success) {
-        // Mark test as completed (web app pattern)
-        const completionKey = `test_completed_${studentId}_matching_type_${testId}`;
-        await AsyncStorage.setItem(completionKey, 'true');
+        // Mark test as completed and clear retest keys (web app pattern)
+        const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+        await markTestCompleted(studentId, 'matching_type', testIdStr);
         
         // Cache the test results immediately after successful submission (web app pattern)
         const cacheKey = `student_results_table_${studentId}`;
         await AsyncStorage.setItem(cacheKey, JSON.stringify(response.data));
-        console.log('🎓 Test results cached with key:', cacheKey);
-        
-        // Clear retest key if it exists
-        const retestKey = `retest1_${studentId}_matching_type_${testId}`;
-        await AsyncStorage.removeItem(retestKey);
-        
-        // Clear retest assignment key if it exists
-        const retestAssignKey = `retest_assignment_id_${studentId}_matching_type_${testId}`;
-        await AsyncStorage.removeItem(retestAssignKey);
+        console.log('🎓 Matching test results cached with key:', cacheKey);
         
         // Clear progress key (like input test)
         const progressKey = `test_progress_${studentId}_matching_type_${testId}`;

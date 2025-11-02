@@ -11,7 +11,7 @@ import Animated, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MenuTheme } from './MenuTheme';
 import { useTheme } from '../../contexts/ThemeContext';
-import { getThemeClasses } from '../../utils/themeUtils';
+import { getThemeClasses, getFontFamily } from '../../utils/themeUtils';
 
 interface MenuHeaderProps {
   userName: string;
@@ -72,6 +72,7 @@ export const MenuHeader: React.FC<MenuHeaderProps> = ({
       <View className="items-center mb-6 pt-4">
         <Text 
           style={{
+            fontFamily: themeMode === 'cyberpunk' ? getFontFamily(themeMode, 'cyberpunk') : undefined,
             color: themeMode === 'cyberpunk' ? '#00ffd2' : 'white',
             fontSize: MenuTheme.typography.heading.fontSize,
             fontWeight: MenuTheme.typography.heading.fontWeight,

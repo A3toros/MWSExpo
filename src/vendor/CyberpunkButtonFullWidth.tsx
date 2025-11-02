@@ -164,6 +164,34 @@ function CyberpunkButtonFullWidth(
   });
 
   const renderButton = (isCover = false) => {
+    // Build text style exactly like MenuSection does - simple inline object
+    // Extract fontFamily first
+    const fontFamily = labelTextStyle?.fontFamily;
+    
+    // Build simple style object - don't use spreads that might confuse React Native
+    const textStyle: any = {
+      color: labelTextStyle?.color || styles.labelText.color || '#ffffff',
+      fontSize: buttonHeight / 2.5,
+      textAlign: labelTextStyle?.textAlign || 'center',
+      letterSpacing: labelTextStyle?.letterSpacing ?? styles.labelText.letterSpacing ?? 3,
+    };
+    
+    // Apply fontFamily directly if present - exactly like MenuSection does
+    if (fontFamily) {
+      textStyle.fontFamily = fontFamily;
+      // Don't use fontWeight '800' with custom fonts - use 'normal' or remove it
+      textStyle.fontWeight = 'normal';
+    } else {
+      textStyle.fontWeight = labelTextStyle?.fontWeight || styles.labelText.fontWeight || 'bold';
+    }
+    
+    // Apply glitch styles if this is the cover
+    if (isCover) {
+      textStyle.textShadowOffset = styles.glitchText.textShadowOffset;
+      textStyle.textShadowRadius = styles.glitchText.textShadowRadius;
+      textStyle.textShadowColor = shadowColor;
+    }
+
     return (
       <View style={[styles.row, { flexGrow: 1, alignSelf: 'stretch' }]}>
         <View>
@@ -197,11 +225,14 @@ function CyberpunkButtonFullWidth(
               height: buttonHeight,
               paddingRight: cornerCutSize * 2,
               paddingLeft: cornerCutSize,
-              paddingBottom: Math.max(8, buttonHeight / 8),
+              paddingTop: 0,
+              paddingBottom: 0,
               borderColor: shadowColor,
               backgroundColor: mainColor,
               flex: 1, // allow stretching to full width
               alignSelf: 'stretch',
+              justifyContent: 'center', // Center text vertically
+              alignItems: 'center', // Center text horizontally (already handled by textAlign)
             },
             isCover
               ? {
@@ -211,15 +242,7 @@ function CyberpunkButtonFullWidth(
               : null,
           ]}
         >
-          <Text
-            style={[
-              styles.labelText,
-              { fontSize: buttonHeight / 2.5 },
-              labelTextStyle,
-              isCover ? styles.glitchText : null,
-              isCover ? { textShadowColor: shadowColor } : null,
-            ]}
-          >
+          <Text style={textStyle}>
             {label?.toUpperCase()}
           </Text>
         </View>

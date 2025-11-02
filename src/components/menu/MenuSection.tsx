@@ -8,6 +8,8 @@ import Animated, {
   withSpring
 } from 'react-native-reanimated';
 import { MenuTheme } from './MenuTheme';
+import { useTheme } from '../../contexts/ThemeContext';
+import { getFontFamily } from '../../utils/themeUtils';
 
 interface MenuSectionProps {
   title: string;
@@ -20,6 +22,7 @@ export const MenuSection: React.FC<MenuSectionProps> = ({
   children,
   delay = 0,
 }) => {
+  const { themeMode } = useTheme();
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(20);
 
@@ -44,7 +47,8 @@ export const MenuSection: React.FC<MenuSectionProps> = ({
     <Animated.View style={[animatedStyle]} className="mb-6">
       <Text 
         style={{
-          color: 'rgba(255, 255, 255, 0.6)',
+          fontFamily: themeMode === 'cyberpunk' ? getFontFamily(themeMode, 'cyberpunk') : undefined,
+          color: themeMode === 'cyberpunk' ? 'rgba(0, 255, 210, 0.8)' : 'rgba(255, 255, 255, 0.6)',
           fontSize: MenuTheme.typography.small.fontSize,
           fontWeight: '600',
           textTransform: 'uppercase',

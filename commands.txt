@@ -5,3 +5,7 @@ cd android
 cd ..
 npx expo start -c
 npx expo run:android
+
+npm i -g eas-cli
+eas build:configure
+eas build -p android --profile production --local

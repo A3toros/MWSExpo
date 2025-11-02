@@ -13,7 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { MenuTheme } from './MenuTheme';
 import { useTheme } from '../../contexts/ThemeContext';
-import { getThemeClasses } from '../../utils/themeUtils';
+import { getThemeClasses, getFontFamily } from '../../utils/themeUtils';
 
 type PaletteKey = 'yellow' | 'cyan' | 'red' | 'blue' | 'green' | 'purple';
 
@@ -135,11 +135,14 @@ export const MenuItem: React.FC<MenuItemProps> = ({
               glitchAmplitude={10}
               repeatDelay={1500}
               labelTextStyle={{
+                fontFamily: getFontFamily(themeMode, 'cyberpunk'),
                 fontWeight: '800',
                 letterSpacing: 1,
                 color: labelColor,
                 textAlign: 'center',
               }}
+              // Debug: Log font family being passed
+              // Remove this after debugging
               labelContainerStyle={{ width: '100%', alignSelf: 'stretch' }}
               disableAutoAnimation={!active}
               style={{ width: '100%', minWidth: '100%', alignSelf: 'stretch' }}
@@ -227,6 +230,7 @@ export const MenuItem: React.FC<MenuItemProps> = ({
           <View className="flex-1">
             <Text 
               style={{
+                fontFamily: themeMode === 'cyberpunk' ? getFontFamily(themeMode, 'cyberpunk') : undefined,
                 color: themeMode === 'cyberpunk' ? accent : variantStyles.textColor,
                 fontSize: MenuTheme.typography.body.fontSize,
                 fontWeight: MenuTheme.typography.body.fontWeight,
@@ -238,6 +242,7 @@ export const MenuItem: React.FC<MenuItemProps> = ({
             {subtitle && (
               <Text 
                 style={{
+                  fontFamily: themeMode === 'cyberpunk' ? getFontFamily(themeMode, 'cyberpunk') : undefined,
                   color: themeMode === 'cyberpunk' ? '#f8ef02' : 'rgba(255, 255, 255, 0.8)',
                   fontSize: MenuTheme.typography.caption.fontSize,
                   marginTop: 2,
@@ -272,6 +277,7 @@ export const MenuItem: React.FC<MenuItemProps> = ({
           >
             <Text 
               style={{
+                fontFamily: themeMode === 'cyberpunk' ? getFontFamily(themeMode, 'cyberpunk') : undefined,
                 color: themeMode === 'cyberpunk' ? (color === 'yellow' ? '#000000' : '#000000') : MenuTheme.colors.primary,
                 fontSize: 12,
                 fontWeight: '600',

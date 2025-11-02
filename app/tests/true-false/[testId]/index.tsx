@@ -14,6 +14,7 @@ import { SubmitModal } from '../../../../src/components/modals';
 import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
+import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 
 export default function TrueFalseTestScreen() {
   const { testId } = useLocalSearchParams();
@@ -416,6 +417,10 @@ export default function TrueFalseTestScreen() {
       const maxScore = questions.length;
       const percentage = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
 
+      // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
+      const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+      const retestAssignmentId = await getRetestAssignmentId(user.student_id, 'true_false', testIdStr);
+      
       const submissionData = {
         test_id: testId,
         test_name: testData.test_name || testData.title,
@@ -441,19 +446,16 @@ export default function TrueFalseTestScreen() {
           return acc;
         }, {} as Record<string, string>),
         question_order: questions.map(q => q.question_id),
-        retest_assignment_id: null,
+        retest_assignment_id: retestAssignmentId,
         parent_test_id: testId
       };
 
       const response = await api.post('/api/submit-true-false-test', submissionData);
       
       if (response.data.success) {
-        const completionKey = `test_completed_${user.student_id}_true_false_${testId}`;
-        await AsyncStorage.setItem(completionKey, 'true');
-        
-        const retestKey = `retest1_${user.student_id}_true_false_${testId}`;
-        const retestAssignKey = `retest_assignment_id_${user.student_id}_true_false_${testId}`;
-        await AsyncStorage.multiRemove([retestKey, retestAssignKey]);
+        // Mark test as completed and clear retest keys (web app pattern)
+        const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+        await markTestCompleted(user.student_id, 'true_false', testIdStr);
 
         const detailedResults = {
           testName: testData.test_name || testData.title,

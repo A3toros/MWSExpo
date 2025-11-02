@@ -14,6 +14,7 @@ import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
+import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 
 export default function WordMatchingTestScreen() {
   const { testId } = useLocalSearchParams<{ testId: string }>();
@@ -302,6 +303,10 @@ export default function WordMatchingTestScreen() {
         }
       }
 
+      // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
+      // @ts-ignore - testId from useLocalSearchParams can be string | string[], helper accepts string | number | string[]
+      const retestAssignmentId = await getRetestAssignmentId(studentId, 'word_matching', testId);
+      
       const submissionData = {
         test_id: parseInt(testId),
         test_name: testData.test_name,
@@ -309,6 +314,8 @@ export default function WordMatchingTestScreen() {
         subject_id: testData.subject_id,
         student_id: studentId,
         academic_period_id: academic_period_id,
+        parent_test_id: parseInt(testId),
+        retest_assignment_id: retestAssignmentId,
         score: correctMatches,
         maxScore: testData.leftWords?.length || 0,
         answers: answers,
@@ -327,17 +334,9 @@ export default function WordMatchingTestScreen() {
       console.log('🧩 Submission response:', response?.data);
       
       if (response.data.success) {
-        // Mark test as completed (web app pattern)
-        const completionKey = `test_completed_${studentId}_word_matching_${testId}`;
-        await AsyncStorage.setItem(completionKey, 'true');
-        
-        // Clear retest key if it exists
-        const retestKey = `retest1_${studentId}_word_matching_${testId}`;
-        await AsyncStorage.removeItem(retestKey);
-        
-        // Clear retest assignment key if it exists
-        const retestAssignKey = `retest_assignment_id_${studentId}_word_matching_${testId}`;
-        await AsyncStorage.removeItem(retestAssignKey);
+        // Mark test as completed and clear retest keys (web app pattern)
+        // @ts-ignore - testId from useLocalSearchParams can be string | string[], helper accepts string | number | string[]
+        await markTestCompleted(studentId, 'word_matching', testId);
         
         setTestResults(response.data);
         setShowResults(true);

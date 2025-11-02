@@ -24,6 +24,7 @@ import { SubmitModal } from '../../../../src/components/modals';
 import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
+import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 
 // Function to decode JWT and extract student_id
 const getStudentIdFromToken = async (): Promise<string | null> => {
@@ -736,6 +737,10 @@ export default function DrawingTestScreen() {
       
       console.log('📅 Current academic period ID:', academic_period_id);
       
+      // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
+      const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+      const retestAssignmentId = await getRetestAssignmentId(studentId, 'drawing', testIdStr);
+      
       const submissionData = {
         test_id: testId,
         test_name: testData.test_name || testData.title,
@@ -754,7 +759,7 @@ export default function DrawingTestScreen() {
         visibility_change_times: visibilityChangeTimes,
         answers_by_id: {} as Record<string, any>, // Will be populated separately
         question_order: questions.map(q => q.question_id),
-        retest_assignment_id: null,
+        retest_assignment_id: retestAssignmentId,
         parent_test_id: testId
       };
       
@@ -819,21 +824,15 @@ export default function DrawingTestScreen() {
       
       if (response.data.success) {
         console.log('✅ Submission successful!');
-        // Mark as completed
-        const completionKey = `test_completed_${studentId}_drawing_${testId}`;
-        await AsyncStorage.setItem(completionKey, 'true');
-        console.log('✅ Marked test as completed');
+        // Mark test as completed and clear retest keys (web app pattern)
+        const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+        await markTestCompleted(studentId, 'drawing', testIdStr);
+        console.log('✅ Marked test as completed and cleared retest keys');
         
         // Cache the test results immediately after successful submission (web app pattern)
         const cacheKey = `student_results_table_${studentId}`;
         await AsyncStorage.setItem(cacheKey, JSON.stringify(response.data));
-        console.log('🎓 Test results cached with key:', cacheKey);
-        
-        // Clear retest keys
-        const retestKey = `retest1_${studentId}_drawing_${testId}`;
-        const retestAssignKey = `retest_assignment_id_${studentId}_drawing_${testId}`;
-        await AsyncStorage.multiRemove([retestKey, retestAssignKey]);
-        console.log('✅ Cleared retest keys');
+        console.log('🎓 Drawing test results cached with key:', cacheKey);
         
         // Clear progress key (like matching test)
         const progressKey = `test_progress_${studentId}_drawing_${testId}`;

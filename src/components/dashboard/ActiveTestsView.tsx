@@ -16,6 +16,7 @@ type ActiveTest = {
   assigned_at?: number;
   deadline?: number | null;
   retest_available?: boolean;
+  retest_attempts_left?: number | null;
 };
 
 type Props = {
@@ -108,7 +109,7 @@ export function ActiveTestsView({
                   );
                 }
                 
-                // Show completed status
+                // Show completed status for regular tests (no retest available)
                 if (isCompleted && !test?.retest_available) {
                   return (
                     <ThemedButton
@@ -120,60 +121,82 @@ export function ActiveTestsView({
                   );
                 }
                 
-                // Show retest button if available
+                // If test is completed with retest available:
+                // Always show "Completed" regardless of attempts_left (test was just submitted)
+                // This handles the case where test was just submitted and API hasn't updated yet
                 if (isCompleted && test?.retest_available) {
                   return (
                     <ThemedButton
-                      title={themeMode === 'cyberpunk' ? 'START RETEST' : 'Start Retest'}
+                      title={themeMode === 'cyberpunk' ? '✓ COMPLETED' : '✓ Completed'}
+                      disabled
                       size="sm"
                       variant="modal"
-                      onPress={() => {
-                        // Copy web app navigation logic exactly
-                        if (test.test_type === 'matching_type') {
-                          router.push(`/tests/matching/${test.test_id}`);
-                          return;
-                        }
-                        
-                        if (test.test_type === 'word_matching') {
-                          router.push(`/tests/word-matching/${test.test_id}`);
-                          return;
-                        }
-                        
-                        if (test.test_type === 'speaking') {
-                          router.push(`/tests/speaking/${test.test_id}`);
-                          return;
-                        }
-                        
-                        if (test.test_type === 'multiple_choice') {
-                          router.push(`/tests/multiple-choice/${test.test_id}?type=multiple_choice`);
-                          return;
-                        }
-                        
-                        if (test.test_type === 'true_false') {
-                          router.push(`/tests/true-false/${test.test_id}?type=true_false`);
-                          return;
-                        }
-                        
-                        if (test.test_type === 'input') {
-                          router.push(`/tests/input/${test.test_id}?type=input`);
-                          return;
-                        }
-                        
-                        if (test.test_type === 'drawing') {
-                          router.push(`/tests/drawing/${test.test_id}?type=drawing`);
-                          return;
-                        }
-                        
-                        if (test.test_type === 'fill_blanks') {
-                          router.push(`/tests/fill-blanks/${test.test_id}?type=fill_blanks`);
-                          return;
-                        }
-                        
-                        // Default navigation for other test types
-                        router.push(`/tests/${test.test_type}/${test.test_id}?type=${test.test_type}`);
-                      }}
                     />
                   );
+                }
+                
+                // If retest is available and NOT completed yet, check attempts
+                if (!isCompleted && test?.retest_available) {
+                  const hasRetestAttempts = 
+                    test?.retest_attempts_left !== undefined &&
+                    test?.retest_attempts_left !== null &&
+                    test?.retest_attempts_left > 0;
+                  
+                  if (hasRetestAttempts) {
+                    // Show "Start Retest" button if attempts are available and test is not completed
+                    return (
+                      <ThemedButton
+                        title={themeMode === 'cyberpunk' ? 'START RETEST' : 'Start Retest'}
+                        size="sm"
+                        variant="modal"
+                        onPress={() => {
+                          // Copy web app navigation logic exactly
+                          if (test.test_type === 'matching_type') {
+                            router.push(`/tests/matching/${test.test_id}`);
+                            return;
+                          }
+                          
+                          if (test.test_type === 'word_matching') {
+                            router.push(`/tests/word-matching/${test.test_id}`);
+                            return;
+                          }
+                          
+                          if (test.test_type === 'speaking') {
+                            router.push(`/tests/speaking/${test.test_id}`);
+                            return;
+                          }
+                          
+                          if (test.test_type === 'multiple_choice') {
+                            router.push(`/tests/multiple-choice/${test.test_id}?type=multiple_choice`);
+                            return;
+                          }
+                          
+                          if (test.test_type === 'true_false') {
+                            router.push(`/tests/true-false/${test.test_id}?type=true_false`);
+                            return;
+                          }
+                          
+                          if (test.test_type === 'input') {
+                            router.push(`/tests/input/${test.test_id}?type=input`);
+                            return;
+                          }
+                          
+                          if (test.test_type === 'drawing') {
+                            router.push(`/tests/drawing/${test.test_id}?type=drawing`);
+                            return;
+                          }
+                          
+                          if (test.test_type === 'fill_blanks') {
+                            router.push(`/tests/fill-blanks/${test.test_id}?type=fill_blanks`);
+                            return;
+                          }
+                          
+                          // Default navigation for other test types
+                          router.push(`/tests/${test.test_type}/${test.test_id}?type=${test.test_type}`);
+                        }}
+                      />
+                    );
+                  }
                 }
                 
                 // Show start test button

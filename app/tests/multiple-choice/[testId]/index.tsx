@@ -14,6 +14,7 @@ import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import TestHeader from '../../../../src/components/TestHeader';
+import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 
 export default function MultipleChoiceTestScreen() {
   const { testId } = useLocalSearchParams();
@@ -419,6 +420,10 @@ export default function MultipleChoiceTestScreen() {
         return '';
       };
 
+      // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
+      const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+      const retestAssignmentId = await getRetestAssignmentId(studentId, 'multiple_choice', testIdStr);
+      
       const submissionData = {
         test_id: testId,
         test_name: testData.test_name || testData.title,
@@ -444,29 +449,21 @@ export default function MultipleChoiceTestScreen() {
           return acc;
         }, {} as Record<string, string>),
         question_order: questions.map(q => q.question_id),
-        retest_assignment_id: null,
+        retest_assignment_id: retestAssignmentId,
         parent_test_id: testId
       };
 
       const response = await api.post('/api/submit-multiple-choice-test', submissionData);
       
       if (response.data.success) {
-        // Mark test as completed (web app pattern)
-        const completionKey = `test_completed_${studentId}_multiple_choice_${testId}`;
-        await AsyncStorage.setItem(completionKey, 'true');
+        // Mark test as completed and clear retest keys (web app pattern)
+        const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+        await markTestCompleted(studentId, 'multiple_choice', testIdStr);
         
         // Cache the test results immediately after successful submission (web app pattern)
         const cacheKey = `student_results_table_${studentId}`;
         await AsyncStorage.setItem(cacheKey, JSON.stringify(response.data));
         console.log('🎓 Test results cached with key:', cacheKey);
-        
-        // Clear retest key if it exists
-        const retestKey = `retest1_${studentId}_multiple_choice_${testId}`;
-        await AsyncStorage.removeItem(retestKey);
-        
-        // Clear retest assignment key if it exists
-        const retestAssignKey = `retest_assignment_id_${studentId}_multiple_choice_${testId}`;
-        await AsyncStorage.removeItem(retestAssignKey);
         
         // Clear progress key
         const progressKey = `test_progress_${studentId}_multiple_choice_${testId}`;

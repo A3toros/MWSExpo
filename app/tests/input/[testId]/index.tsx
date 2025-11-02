@@ -15,6 +15,7 @@ import { setAnswer, setIndex, startTest, hydrateFromStorage, tickSecond } from '
 import TestResults from '../../../../src/components/TestResults';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
+import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 
 export default function TestRunnerScreen() {
   const { testId, type } = useLocalSearchParams<{ testId: string; type?: string }>();
@@ -511,6 +512,9 @@ export default function TestRunnerScreen() {
     })();
 
     try {
+      // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
+      const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+      const retestAssignmentId = await getRetestAssignmentId(studentId, 'input', testIdStr);
       
       const payload = {
         test_id: testId,
@@ -538,7 +542,7 @@ export default function TestRunnerScreen() {
           return acc;
         }, {} as Record<string, string>),
         question_order: questions.map(q => q.question_id),
-        retest_assignment_id: null,
+        retest_assignment_id: retestAssignmentId,
         parent_test_id: testId
       };
 
@@ -556,8 +560,12 @@ export default function TestRunnerScreen() {
         const response = await api.post('/api/submit-input-test', payload);
         
         if (response.data.success) {
-          // Cache the test results immediately after successful submission (web app pattern)
+          // Mark test as completed and clear retest keys (web app pattern)
           if (studentId) {
+            const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+            await markTestCompleted(studentId, 'input', testIdStr);
+            
+            // Cache the test results immediately after successful submission (web app pattern)
             const cacheKey = `student_results_table_${studentId}`;
             await AsyncStorage.setItem(cacheKey, JSON.stringify(response.data));
             console.log('🎓 Test results cached with key:', cacheKey);

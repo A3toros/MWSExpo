@@ -16,6 +16,7 @@ import { SubmitModal } from '../../../../src/components/modals';
 import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
+import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 
 export default function FillBlanksTestScreen() {
   const { testId } = useLocalSearchParams();
@@ -471,6 +472,10 @@ export default function FillBlanksTestScreen() {
       const maxScore = questions.length;
       const percentage = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
 
+      // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
+      const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+      const retestAssignmentId = await getRetestAssignmentId(user.student_id, 'fill_blanks', testIdStr);
+      
       const submissionData = {
         test_id: testId,
         test_name: testData.test_name || testData.title || `Test ${testId}`,
@@ -496,29 +501,21 @@ export default function FillBlanksTestScreen() {
           return acc;
         }, {} as Record<string, string>),
         question_order: questions.map(q => q.question_id),
-        retest_assignment_id: null,
+        retest_assignment_id: retestAssignmentId,
         parent_test_id: testId
       };
 
       const response = await api.post('/api/submit-fill-blanks-test', submissionData);
       
       if (response.data.success) {
-        // Mark test as completed (web app pattern)
-        const completionKey = `test_completed_${user.student_id}_fill_blanks_${testId}`;
-        await AsyncStorage.setItem(completionKey, 'true');
+        // Mark test as completed and clear retest keys (web app pattern)
+        const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
+        await markTestCompleted(user.student_id, 'fill_blanks', testIdStr);
         
         // Cache the test results immediately after successful submission (web app pattern)
         const cacheKey = `student_results_table_${user.student_id}`;
         await AsyncStorage.setItem(cacheKey, JSON.stringify(response.data));
         console.log('🎓 Fill-blanks test results cached with key:', cacheKey);
-        
-        // Clear retest key if it exists
-        const retestKey = `retest1_${user.student_id}_fill_blanks_${testId}`;
-        await AsyncStorage.removeItem(retestKey);
-        
-        // Clear retest assignment key if it exists
-        const retestAssignKey = `retest_assignment_id_${user.student_id}_fill_blanks_${testId}`;
-        await AsyncStorage.removeItem(retestAssignKey);
         
         // Clear progress key
         const progressKey = `test_progress_${user.student_id}_fill_blanks_${testId}`;

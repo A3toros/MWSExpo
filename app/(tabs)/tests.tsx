@@ -1,10 +1,22 @@
 import { FlatList, RefreshControl, View, Text, TouchableOpacity } from 'react-native';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { api } from '../../src/services/apiClient';
 import { Link } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { processRetestAvailability } from '../../src/utils/retestUtils';
 
-type ActiveTest = { test_id: number; test_name: string; test_type: string; teacher_name: string; assigned_at: number; deadline?: number };
+type ActiveTest = { 
+  test_id: number; 
+  test_name: string; 
+  test_type: string; 
+  teacher_name: string; 
+  assigned_at: number; 
+  deadline?: number;
+  retest_available?: boolean;
+  retest_attempts_left?: number;
+  retest_assignment_id?: number;
+};
 
 export default function TestsScreen() {
   const [tests, setTests] = useState<ActiveTest[]>([]);
@@ -25,8 +37,26 @@ export default function TestsScreen() {
         console.log('Tests tab: Sample test:', res.data.tests[0]);
       }
       
-      setTests(res.data?.tests ?? []);
-      console.log('Tests tab: State updated with', res.data?.tests?.length || 0, 'tests');
+      const testsData: ActiveTest[] = res.data?.tests ?? [];
+      setTests(testsData);
+      
+      // Process retest_available flag (web app pattern) using helper
+      try {
+        const userData = await AsyncStorage.getItem('user_data');
+        const studentId = userData ? JSON.parse(userData).student_id : null;
+        
+        if (studentId) {
+          for (const test of testsData) {
+            if (test.retest_available) {
+              await processRetestAvailability(test, studentId);
+            }
+          }
+        }
+      } catch (retestError) {
+        console.warn('Tests tab: Error processing retest keys:', retestError);
+      }
+      
+      console.log('Tests tab: State updated with', testsData.length, 'tests');
       console.log('=== TESTS TAB DEBUG END ===');
     } catch (e: any) {
       console.error('=== TESTS TAB ERROR ===');
