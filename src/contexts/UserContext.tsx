@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SecureToken } from '../utils/secureTokenStorage';
 
 // Types
 export interface Student {
@@ -247,10 +248,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'UPDATE_STATISTICS', payload: stats });
   };
 
-  const logout = () => {
+  const logout = async () => {
     dispatch({ type: 'LOGOUT' });
     // Clear stored data
-    AsyncStorage.multiRemove(['userProfile', 'testProgress', 'authToken']);
+    // Clear token using SecureToken (handles SecureStore and AsyncStorage)
+    await SecureToken.clear();
+    // Clear other non-sensitive data
+    await AsyncStorage.multiRemove(['userProfile', 'testProgress', 'authToken', 'refresh_token']);
   };
 
   const value = {

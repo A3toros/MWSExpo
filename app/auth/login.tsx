@@ -4,6 +4,7 @@ import { useAppDispatch, useAppSelector } from '../../src/store';
 import { loginFailure, loginStart, loginSuccess } from '../../src/store/slices/authSlice';
 import { api } from '../../src/services/apiClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SecureToken } from '../../src/utils/secureTokenStorage';
 import { router } from 'expo-router';
 
 export default function LoginScreen() {
@@ -48,7 +49,15 @@ export default function LoginScreen() {
       console.log('Extracted data:', { accessToken: !!accessToken, refreshToken: !!refreshToken, student });
       console.log('Student data:', student);
       
-      await AsyncStorage.setItem('auth_token', accessToken);
+      // Use SecureToken to store access token (with hash verification, retry, write verification)
+      const tokenStored = await SecureToken.set(accessToken);
+      if (!tokenStored) {
+        console.error('Failed to store token securely');
+        dispatch(loginFailure('Failed to store authentication token'));
+        return;
+      }
+      
+      // Store refresh token and user data in AsyncStorage (non-sensitive)
       await AsyncStorage.setItem('refresh_token', refreshToken);
       await AsyncStorage.setItem('auth_user', JSON.stringify(student));
       

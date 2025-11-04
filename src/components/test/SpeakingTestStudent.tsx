@@ -42,7 +42,8 @@ export default function SpeakingTestStudent({
   // Helper function to decode JWT token and extract student ID
   const getStudentIdFromToken = async (): Promise<string | null> => {
     try {
-      const token = await AsyncStorage.getItem('auth_token');
+      const { SecureToken } = await import('../../utils/secureTokenStorage');
+      const token = await SecureToken.get();
       if (!token) return null;
       
       // Decode JWT token (simple base64 decode of payload)

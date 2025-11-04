@@ -216,8 +216,44 @@ export default function DashboardScreen() {
           api.get('/api/get-student-active-tests', { params: { cb: cacheBust } }),
           api.get('/api/get-student-test-results', { params: { student_id: studentId, limit: 5, cb: cacheBust } }),
         ]);
-        const testsData: ActiveTest[] = testsRes.data?.tests ?? testsRes.data?.data ?? [];
+        let testsData: ActiveTest[] = testsRes.data?.tests ?? testsRes.data?.data ?? [];
         const rawResults = resultsRes.data?.results ?? resultsRes.data?.data ?? [];
+        
+        // Filter out completed tests without retest available (same as web app)
+        // This is a client-side backup to ensure completed tests are not shown
+        const filteredTests: ActiveTest[] = [];
+        for (const test of testsData) {
+          const testKey = `${test.test_type}_${test.test_id}`;
+          const isCompleted = completed.has(testKey);
+          
+          // Don't show if completed AND no retest available
+          if (isCompleted && !test.retest_available) {
+            console.log('🎓 Filtering out completed test (no retest):', testKey);
+            continue;
+          }
+          
+          // Also filter out completed retests where attempts are exhausted
+          if (isCompleted && test.retest_available) {
+            try {
+              // Check retest_attempts metadata to see if attempts are exhausted
+              const attemptsMetaKey = `retest_attempts_${studentId}_${test.test_type}_${test.test_id}`;
+              const attemptsMetaRaw = await AsyncStorage.getItem(attemptsMetaKey);
+              if (attemptsMetaRaw) {
+                const attemptsMeta = JSON.parse(attemptsMetaRaw);
+                const attemptsLeft = attemptsMeta.max - attemptsMeta.used;
+                if (attemptsLeft <= 0) {
+                  console.log('🎓 Filtering out completed retest (attempts exhausted):', testKey);
+                  continue;
+                }
+              }
+            } catch (e) {
+              console.warn('Error checking retest attempts metadata:', e);
+            }
+          }
+          
+          filteredTests.push(test);
+        }
+        testsData = filteredTests;
         // Transform API data to TestResult format
         const resultsData: TestResult[] = rawResults.map((result: any) => ({
           id: result.id || result.test_id,
@@ -269,7 +305,7 @@ export default function DashboardScreen() {
             // Check if this test has retest available with attempts left
             const testWithRetest = testsData.find(t => 
               t.test_type === result.test_type && 
-              t.test_id === result.test_id
+              String(t.test_id) === String(result.test_id)
             );
             
             const hasRetestWithAttempts = 
@@ -539,8 +575,16 @@ export default function DashboardScreen() {
         userName={user?.nickname || user?.name || 'Student'}
         userRole="Student"
         activeTestsCount={tests.filter(test => {
+          // Filter out completed tests without retest (same as web app)
           const testKey = `${test.test_type}_${test.test_id}`;
-          return !completedTests.has(testKey);
+          const isCompleted = completedTests.has(testKey);
+          
+          // Don't count if completed AND no retest available
+          if (isCompleted && !test.retest_available) {
+            return false;
+          }
+          
+          return true;
         }).length}
       />
 
@@ -681,7 +725,22 @@ export default function DashboardScreen() {
 
           {currentView === 'active' && (
             <ActiveTestsView
-              tests={tests}
+              tests={tests.filter(test => {
+                // Additional client-side filtering: don't show completed tests without retest
+                const testKey = `${test.test_type}_${test.test_id}`;
+                const isCompleted = completedTests.has(testKey);
+                
+                // Filter out if completed AND no retest available
+                if (isCompleted && !test.retest_available) {
+                  return false;
+                }
+                
+                // Filter out completed retests where attempts are exhausted
+                // (This is checked in ActiveTestsView via retestAttempts metadata)
+                // We'll let ActiveTestsView handle the filtering based on attempts metadata
+                
+                return true;
+              })}
               loading={loading}
               completedTests={completedTests}
               isCompletionStatusLoaded={isCompletionStatusLoaded}

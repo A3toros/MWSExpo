@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SecureToken } from '../utils/secureTokenStorage';
 
 export const api = axios.create({
   baseURL: process.env.EXPO_PUBLIC_API_BASE_URL || 'https://mathayomwatsing.netlify.app',
@@ -24,7 +25,7 @@ const pendingQueue: PendingRequest[] = [];
 
 async function setAuthHeader(config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> {
   try {
-    const token = await AsyncStorage.getItem('auth_token');
+    const token = await SecureToken.get();
     if (token) {
       config.headers = config.headers ?? {};
       config.headers.Authorization = `Bearer ${token}`;
@@ -60,7 +61,9 @@ api.interceptors.response.use(
         const response = await api.post('/api/refresh-token', { refreshToken });
         const newAccessToken = (response.data as any)?.accessToken;
         if (!newAccessToken) throw new Error('No access token in refresh');
-        await AsyncStorage.setItem('auth_token', newAccessToken);
+        
+        // Use SecureToken to store the new token (with hash verification, retry, write verification)
+        await SecureToken.set(newAccessToken);
 
         // Drain queue
         pendingQueue.splice(0).forEach((p) => p.resolve(true));
@@ -68,7 +71,9 @@ api.interceptors.response.use(
         // Retry the original request with new token
         return api(await setAuthHeader(originalRequest));
       } catch (refreshErr) {
-        await AsyncStorage.multiRemove(['auth_token', 'refresh_token']).catch(() => {});
+        // Clear tokens using SecureToken
+        await SecureToken.clear().catch(() => {});
+        await AsyncStorage.removeItem('refresh_token').catch(() => {});
         pendingQueue.splice(0).forEach((p) => p.reject(refreshErr));
         return Promise.reject(refreshErr);
       } finally {

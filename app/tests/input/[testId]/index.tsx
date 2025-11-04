@@ -15,7 +15,7 @@ import { setAnswer, setIndex, startTest, hydrateFromStorage, tickSecond } from '
 import TestResults from '../../../../src/components/TestResults';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
-import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
+import { getRetestAssignmentId, markTestCompleted, handleRetestCompletion } from '../../../../src/utils/retestUtils';
 
 export default function TestRunnerScreen() {
   const { testId, type } = useLocalSearchParams<{ testId: string; type?: string }>();
@@ -723,10 +723,15 @@ export default function TestRunnerScreen() {
         const response = await api.post('/api/submit-input-test', payload);
         
         if (response.data.success) {
-          // Mark test as completed and clear retest keys (web app pattern)
+          // Handle retest completion (web app pattern) - write attempt keys and check completion
           if (studentId) {
             const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
-            await markTestCompleted(studentId, 'input', testIdStr);
+            const percentage = Math.round((computedScore / questions.length) * 100);
+            const passed = percentage >= 60;
+            const maxAttempts = testData?.retest_attempts_left || testData?.max_attempts || 3;
+            
+            // Use handleRetestCompletion for retests (same as web app)
+            await handleRetestCompletion(studentId, 'input', testIdStr, maxAttempts, percentage, passed);
             
             // Cache the test results immediately after successful submission (web app pattern)
             const cacheKey = `student_results_table_${studentId}`;
