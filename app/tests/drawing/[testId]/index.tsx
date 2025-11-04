@@ -1,5 +1,5 @@
 /** @jsxImportSource nativewind */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, Alert, ActivityIndicator, ScrollView, TouchableOpacity, Dimensions, Image, AppState } from 'react-native';
 import Animated, { 
   useSharedValue, 
@@ -16,6 +16,7 @@ import { useAppDispatch, useAppSelector } from '../../../../src/store';
 import { api, getSubmissionMethod } from '../../../../src/services/apiClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import TestHeader from '../../../../src/components/TestHeader';
+import ProgressTracker from '../../../../src/components/ProgressTracker';
 import DrawingCanvas from '../../../../src/components/DrawingCanvas';
 import DrawingControls from '../../../../src/components/DrawingControls';
 import { convertAndroidDrawingToWebFormat, skiaToKonvaJSON } from '../../../../src/utils/SkiaDrawingToKonvaJSON';
@@ -69,6 +70,14 @@ export default function DrawingTestScreen() {
   // Anti-cheating state
   const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
   const [caughtCheating, setCaughtCheating] = useState(false);
+  const [timeElapsed, setTimeElapsed] = useState(0);
+  
+  // Timer refs to prevent re-initialization
+  const timerInitializedRef = useRef<boolean>(false);
+  const performSubmitRef = useRef<() => Promise<void>>();
+  const remainingTimeRef = useRef<number>(0);
+  const timerStartedAtRef = useRef<string>('');
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Debug user state
   useEffect(() => {
@@ -154,20 +163,30 @@ export default function DrawingTestScreen() {
     return () => subscription?.remove();
   }, [visibilityChangeTimes]);
 
-  // Check if test is already completed
+  // Check if test is already completed (web app pattern)
+  // IMPORTANT: Allow retests even if test is marked as completed
   const checkTestCompleted = useCallback(async () => {
     if (!studentId || !testId) return false;
     
     try {
+      // Check for retest key first - if retest is available, allow access (web app pattern)
+      const retestKey = `retest1_${studentId}_drawing_${testId}`;
+      const hasRetest = await AsyncStorage.getItem(retestKey);
+      
+      // If retest is available, allow access even if test is completed
+      if (hasRetest === 'true') {
+        console.log('🎓 Retest available - allowing access even if test is completed');
+        return false; // Don't block retests
+      }
+      
+      // Only check completion if no retest is available
       const completionKey = `test_completed_${studentId}_drawing_${testId}`;
       const isCompleted = await AsyncStorage.getItem(completionKey);
-      const retestKey = `retest1_${studentId}_drawing_${testId}`;
-      const isRetest = await AsyncStorage.getItem(retestKey);
       
-      if (isCompleted && !isRetest) {
+      if (isCompleted === 'true') {
         Alert.alert(
-          'Test Already Completed',
-          'This test has already been completed. You cannot retake it.',
+          'Test Completed',
+          'This test has already been completed',
           [{ text: 'OK', onPress: () => router.back() }]
         );
         return true;
@@ -557,7 +576,6 @@ export default function DrawingTestScreen() {
     console.log('🔘 handleSubmit called');
     console.log('🔘 testData:', testData);
     console.log('🔘 questions.length:', questions.length);
-    console.log('🔘 drawingPaths.length:', drawingPaths.length);
     
     if (!testData || !questions.length) {
       console.log('❌ Missing test data or questions');
@@ -565,16 +583,11 @@ export default function DrawingTestScreen() {
       return;
     }
 
-    if (drawingPaths.length === 0) {
-      console.log('❌ No drawing data');
-      Alert.alert('No Drawing', 'Please create a drawing before submitting.');
-      return;
-    }
-
+    // Allow submission even without drawing data - will submit empty structures
     // Show confirmation modal
     console.log('🔘 Showing confirmation modal');
     setShowSubmitModal(true);
-  }, [testData, questions, drawingPaths, testId, user]);
+  }, [testData, questions, testId, user]);
 
   // Actual submit function
   const performSubmit = useCallback(async () => {
@@ -589,11 +602,8 @@ export default function DrawingTestScreen() {
       return;
     }
 
-    if (drawingPaths.length === 0) {
-      console.log('❌ No drawing data to submit');
-      Alert.alert('No Drawing', 'Please create a drawing before submitting.');
-      return;
-    }
+    // Don't check drawingPaths.length here - drawings are stored in AsyncStorage per question
+    // The submission will load from AsyncStorage and check if there's actual drawing data
 
     console.log('✅ Starting submission process');
     setIsSubmittingToAPI(true);
@@ -752,7 +762,7 @@ export default function DrawingTestScreen() {
         answers: allDrawingData, // Simple array of all drawing points from all questions
         score: 0, // Drawing tests are graded by teacher
         maxScore: questions.length,
-        time_taken: 0, // TODO: Implement timer
+        time_taken: timeElapsed,
         started_at: new Date().toISOString(),
         submitted_at: new Date().toISOString(),
         caught_cheating: caughtCheating,
@@ -847,16 +857,8 @@ export default function DrawingTestScreen() {
         await Promise.all(removePromises);
         console.log('✅ Cleared saved drawing data');
 
-        Alert.alert(
-          'Drawing Submitted Successfully!',
-          'Your drawing has been submitted for teacher review.',
-          [
-            {
-              text: 'OK',
-              onPress: () => router.back()
-            }
-          ]
-        );
+        // Navigate directly to dashboard without popup
+        router.back();
       } else {
         console.log('❌ Submission failed:', response.data.error);
         throw new Error(response.data.error || 'Failed to submit test');
@@ -880,6 +882,144 @@ export default function DrawingTestScreen() {
       setIsSubmittingToAPI(false);
     }
   }, [testData, questions, drawingPaths, testId, user, caughtCheating, visibilityChangeTimes]);
+
+  // Store performSubmit in ref to avoid dependency issues
+  useEffect(() => {
+    performSubmitRef.current = performSubmit;
+  }, [performSubmit]);
+
+  // Timer effect - only start if test has timer enabled
+  useEffect(() => {
+    console.log('⏰ [TIMER] Effect triggered', { 
+      hasTestData: !!testData, 
+      questionsLength: questions.length, 
+      studentId: studentId, // Use local studentId state, not user?.student_id
+      testId 
+    });
+    
+    if (!testData || !questions.length || !studentId) {
+      console.log('⏰ [TIMER] Skipping - missing requirements', { 
+        testData: !!testData, 
+        questions: questions.length, 
+        studentId: !!studentId 
+      });
+      return;
+    }
+    
+    // Only start timer if test has a time limit set
+    const allowedTime = testData.allowed_time || testData.time_limit;
+    console.log('⏰ [TIMER] Checking timer', { allowedTime, timerInitialized: timerInitializedRef.current });
+    
+    if (allowedTime && allowedTime > 0) {
+      // Prevent multiple timer initializations
+      if (timerInitializedRef.current) {
+        console.log('⏰ [TIMER] Already initialized - skipping');
+        return;
+      }
+      
+      // CRITICAL: Set ref immediately before any async work to prevent race conditions
+      timerInitializedRef.current = true;
+      console.log('⏰ [TIMER] Starting timer initialization', { allowedTime });
+      
+      const timerKey = `test_timer_${studentId}_drawing_${testId}`;
+      console.log('⏰ [TIMER] Timer key:', timerKey);
+      
+      // Load cached timer state (only once)
+      const loadTimerState = async () => {
+        console.log('⏰ [TIMER] Loading timer state...');
+        try {
+          const cached = await AsyncStorage.getItem(timerKey);
+          const now = Date.now();
+          if (cached) {
+            console.log('⏰ [TIMER] Found cached timer state');
+            const parsed = JSON.parse(cached);
+            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
+            const remaining = Math.max(0, Number(parsed.remainingSeconds || allowedTime) - Math.max(0, drift));
+            console.log('⏰ [TIMER] Cached state loaded', { remaining, drift, cachedRemaining: parsed.remainingSeconds });
+            setTimeElapsed(allowedTime - remaining);
+            return { remaining, startedAt: parsed.startedAt || new Date(now).toISOString() };
+          } else {
+            console.log('⏰ [TIMER] No cached state - initializing new timer');
+            // Initialize new timer
+            const startedAt = new Date(now).toISOString();
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: allowedTime,
+              lastTickAt: new Date(now).toISOString(),
+              startedAt: startedAt
+            }));
+            return { remaining: allowedTime, startedAt };
+          }
+        } catch (e) {
+          console.error('Timer cache init error:', e);
+          const startedAt = new Date().toISOString();
+          return { remaining: allowedTime, startedAt };
+        }
+      };
+
+      // Initialize timer state BEFORE starting interval
+      loadTimerState().then(({ remaining, startedAt }) => {
+        console.log('⏰ [TIMER] Timer state loaded, starting interval', { remaining, startedAt });
+        remainingTimeRef.current = remaining;
+        timerStartedAtRef.current = startedAt;
+        setTimeElapsed(allowedTime - remaining);
+        
+        // Only start interval after timer state is loaded
+        console.log('⏰ [TIMER] Creating interval...', { remaining, hasPerformSubmit: !!performSubmitRef.current });
+        
+        // If timer already expired, submit immediately
+        if (remaining <= 0) {
+          console.log('⏰ [TIMER] Timer already expired - submitting immediately');
+          timerInitializedRef.current = false;
+          performSubmitRef.current?.();
+          return;
+        }
+        
+        countdownTimerRef.current = setInterval(async () => {
+          console.log('⏰ [TIMER] Tick', { remaining: remainingTimeRef.current });
+          remainingTimeRef.current -= 1;
+          setTimeElapsed(allowedTime - remainingTimeRef.current);
+          
+          // Save timer state (preserve startedAt from initialization)
+          try {
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: remainingTimeRef.current,
+              lastTickAt: new Date().toISOString(),
+              startedAt: timerStartedAtRef.current // Preserve original start time
+            }));
+          } catch (e) {
+            console.error('Timer save error:', e);
+          }
+          
+          // Auto-submit when time runs out - no popup, direct submission
+          if (remainingTimeRef.current <= 0) {
+            console.log('⏰ [TIMER] Time expired - submitting', { hasPerformSubmit: !!performSubmitRef.current });
+            if (countdownTimerRef.current) {
+              clearInterval(countdownTimerRef.current);
+              countdownTimerRef.current = null;
+            }
+            timerInitializedRef.current = false; // Reset for retake
+            // Directly submit without any confirmation
+            if (performSubmitRef.current) {
+              console.log('⏰ [TIMER] Calling performSubmit...');
+              performSubmitRef.current();
+            } else {
+              console.error('⏰ [TIMER] performSubmitRef.current is null!');
+            }
+          }
+        }, 1000);
+      });
+
+      return () => {
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+        // Only reset timerInitializedRef if testId or studentId changes (new test)
+        // Don't reset on unmount to prevent re-initialization on re-render
+      };
+    }
+    // If no timer, don't start anything
+  }, [testData, questions.length, studentId, testId]);
 
   // Animation values
   const loadingOpacity = useSharedValue(0);
@@ -960,6 +1100,17 @@ export default function DrawingTestScreen() {
       <TestHeader 
         testName={testData.test_name || testData.title}
       />
+      {/* Progress Tracker */}
+      {testData?.allowed_time > 0 && (
+        <View className="mx-4 mt-4">
+          <ProgressTracker
+            answeredCount={questions.length}
+            totalQuestions={questions.length}
+            percentage={100}
+            timeRemaining={Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed)}
+          />
+        </View>
+      )}
       <ScrollView 
         className="flex-1"
         scrollEnabled={!isDrawing && !isGestureActive}

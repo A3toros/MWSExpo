@@ -176,23 +176,36 @@ export default function FillBlanksTestScreen() {
         return false; // Can't check completion without student ID
       }
       
-      const completionKey = `test_completed_${studentId}_fill_blanks_${testId}`;
-      const isCompleted = await AsyncStorage.getItem(completionKey);
+      // Check for retest key first - if retest is available, allow access (web app pattern)
       const retestKey = `retest1_${studentId}_fill_blanks_${testId}`;
-      const isRetest = await AsyncStorage.getItem(retestKey);
+      const hasRetest = await AsyncStorage.getItem(retestKey);
       
       console.log('🎓 Fill-blanks RN completion check:', {
         studentId,
-        completionKey,
-        isCompleted,
         retestKey,
-        isRetest
+        hasRetest
       });
       
-      if (isCompleted && !isRetest) {
+      // If retest is available, allow access even if test is completed
+      if (hasRetest === 'true') {
+        console.log('🎓 Retest available - allowing access even if test is completed');
+        return false; // Don't block retests
+      }
+      
+      // Only check completion if no retest is available
+      const completionKey = `test_completed_${studentId}_fill_blanks_${testId}`;
+      const isCompleted = await AsyncStorage.getItem(completionKey);
+      
+      console.log('🎓 Fill-blanks RN completion check (no retest):', {
+        studentId,
+        completionKey,
+        isCompleted
+      });
+      
+      if (isCompleted === 'true') {
         Alert.alert(
-          'Test Already Completed',
-          'This test has already been completed. You cannot retake it.',
+          'Test Completed',
+          'This test has already been completed',
           [{ text: 'OK', onPress: () => router.back() }]
         );
         return true;
@@ -237,7 +250,6 @@ export default function FillBlanksTestScreen() {
       }
 
       const testInfo = testResponse.data.test_info || testResponse.data.data;
-      console.log('🔍 Test Data Debug:', testInfo);
       setTestData(testInfo);
       
       // Apply question shuffling if enabled
@@ -383,7 +395,6 @@ export default function FillBlanksTestScreen() {
         }
       }
       
-      console.log('🔍 Final Questions Debug:', finalQuestions);
       setQuestions(finalQuestions);
       
       // Initialize answers array
@@ -401,20 +412,6 @@ export default function FillBlanksTestScreen() {
   useEffect(() => {
     loadTestData();
   }, [loadTestData]);
-
-  // Timer effect
-  useEffect(() => {
-    if (!testData || !questions.length) return;
-    
-    const allowedTime = testData.allowed_time || testData.time_limit;
-    if (allowedTime && allowedTime > 0) {
-      const timer = setInterval(() => {
-        setTimeElapsed(prev => prev + 1);
-      }, 1000);
-
-      return () => clearInterval(timer);
-    }
-  }, [testData, questions.length]);
 
   // Handle answer change
   const handleAnswerChange = useCallback((questionId: string | number, answer: any) => {
@@ -533,27 +530,16 @@ export default function FillBlanksTestScreen() {
           totalQuestions: questions.length,
           percentage: percentage,
           passed: percentage >= 60,
-          questionAnalysis: questions.map((question, index) => {
-            const qa = perQuestion[index];
-            console.log(`🔍 Scoring Debug - Question ${index + 1}:`, {
-              userAnswer: qa.studentAnswer,
-              correctAnswer: qa.correctAnswer,
-              isCorrect: qa.isCorrect,
-              questionBlanks: question.blanks
-            });
-            return {
-              questionNumber: index + 1,
-              question: question.question_text || question.question || `Question ${index + 1}`,
-              userAnswer: qa.studentAnswer,
-              correctAnswer: qa.correctAnswer,
-              isCorrect: qa.isCorrect,
-              score: qa.isCorrect ? 1 : 0,
-              maxScore: 1
-            };
-          }),
-          timestamp: new Date().toISOString(),
-          caught_cheating: false,
-          visibility_change_times: 0
+          questionAnalysis: questions.map((question, index) => ({
+            questionNumber: index + 1,
+            question: question.question_text || question.question || `Question ${index + 1}`,
+            userAnswer: String(answers[index] || ''),
+            correctAnswer: question?.blanks && question.blanks[0]?.correct_answer ? String(question.blanks[0].correct_answer) : (question.correct_answer || ''),
+            isCorrect: perQuestion[index]?.isCorrect || false,
+            score: perQuestion[index]?.isCorrect ? 1 : 0,
+            maxScore: 1
+          })),
+          timestamp: new Date().toISOString()
         };
         
         setTestResults(detailedResults);
@@ -576,7 +562,77 @@ export default function FillBlanksTestScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [user?.student_id, testData, questions, answers, testId]);
+  }, [user?.student_id, testData, questions, answers, testId, isLoadingUser, handleSubmit]);
+
+  // Timer effect - only start if test has timer enabled
+  useEffect(() => {
+    if (!testData || !questions.length || !user?.student_id) return;
+    
+    // Only start timer if test has a time limit set
+    const allowedTime = testData.allowed_time || testData.time_limit;
+    if (allowedTime && allowedTime > 0) {
+      const timerKey = `test_timer_${user.student_id}_fill_blanks_${testId}`;
+      
+      // Load cached timer state
+      const loadTimerState = async () => {
+        try {
+          const cached = await AsyncStorage.getItem(timerKey);
+          const now = Date.now();
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
+            const remaining = Math.max(0, Number(parsed.remainingSeconds || allowedTime) - Math.max(0, drift));
+            setTimeElapsed(allowedTime - remaining);
+            return remaining;
+          } else {
+            // Initialize new timer
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: allowedTime,
+              lastTickAt: new Date(now).toISOString(),
+              startedAt: new Date(now).toISOString()
+            }));
+            return allowedTime;
+          }
+        } catch (e) {
+          console.error('Timer cache init error:', e);
+          return allowedTime;
+        }
+      };
+
+      let remainingTime = allowedTime;
+      loadTimerState().then(remaining => {
+        remainingTime = remaining;
+      });
+
+      const countdownTimer = setInterval(async () => {
+        remainingTime -= 1;
+        setTimeElapsed(allowedTime - remainingTime);
+        
+        // Save timer state
+        try {
+          await AsyncStorage.setItem(timerKey, JSON.stringify({
+            remainingSeconds: remainingTime,
+            lastTickAt: new Date().toISOString(),
+            startedAt: new Date().toISOString()
+          }));
+        } catch (e) {
+          console.error('Timer save error:', e);
+        }
+        
+        // Auto-submit when time runs out - no popup, direct submission
+        if (remainingTime <= 0) {
+          clearInterval(countdownTimer);
+          // Directly submit without any confirmation
+          submitTest();
+        }
+      }, 1000);
+
+      return () => {
+        clearInterval(countdownTimer);
+      };
+    }
+    // If no timer, don't start anything
+  }, [testData, questions.length, user?.student_id, submitTest, testId]);
 
   if (loading) {
     return (
@@ -646,7 +702,7 @@ export default function FillBlanksTestScreen() {
           answeredCount={answers.filter(answer => answer && answer.trim() !== '').length}
           totalQuestions={questions.length}
           percentage={questions.length > 0 ? Math.round((answers.filter(answer => answer && answer.trim() !== '').length / questions.length) * 100) : 0}
-          timeElapsed={testData?.allowed_time > 0 ? timeElapsed : undefined}
+          timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
           onSubmitTest={() => setShowSubmitModal(true)}
           isSubmitting={isSubmitting}
           canSubmit={answers.filter(answer => answer && answer.trim() !== '').length === questions.length}

@@ -23,12 +23,6 @@ export default function FillBlanksTestRenderer({
 
   // Get main test text - try different possible fields
   const mainText = testData?.test_text || testData?.description || testData?.instructions || '';
-  
-  console.log('🔍 FillBlanksTestRenderer Debug:', {
-    mainText,
-    questions: questions.length,
-    questionsData: questions
-  });
 
   // Render main text with numbered blanks (following web app pattern)
   const renderMainTextWithBlanks = () => {
@@ -119,12 +113,6 @@ export default function FillBlanksTestRenderer({
         {questions.map((question: any, questionIndex: number) => {
           const questionText = question.question_text || question.question || `Question ${questionIndex + 1}`;
           const questionBlanks = question.blanks || [];
-          
-          console.log(`🔍 Question ${questionIndex + 1} Debug:`, {
-            questionText,
-            questionBlanks: questionBlanks.length,
-            questionData: question
-          });
           
           return (
             <View 

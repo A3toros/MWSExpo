@@ -120,10 +120,10 @@ export const getModalStyles = (themeMode: ThemeMode) => {
 export const getFontFamily = (themeMode: ThemeMode, fontType: 'primary' | 'secondary' | 'cyberpunk' = 'primary') => {
   if (themeMode === 'cyberpunk') {
     switch (fontType) {
-      case 'primary': return 'Hacked';
+      case 'primary': return 'SpaceMono';
       case 'secondary': return 'Oxanium';
-      case 'cyberpunk': return 'Hacked';
-      default: return 'Hacked';
+      case 'cyberpunk': return 'SpaceMono';
+      default: return 'SpaceMono';
     }
   }
   return 'System';

@@ -134,3 +134,68 @@ export async function markTestCompleted(
   console.log('🎓 Marked test as completed:', completionKey);
 }
 
+/**
+ * Start a retest - set retest key and clear completion key before navigation (web app pattern)
+ * This must be called BEFORE navigating to the test page
+ */
+export async function startRetest(
+  studentId: string,
+  test: {
+    test_id: number;
+    test_type: string;
+    retest_available?: boolean;
+    retest_assignment_id?: number;
+  }
+): Promise<void> {
+  if (!test.retest_available) {
+    console.log('🎓 Retest not available - skipping startRetest');
+    return;
+  }
+
+  const testIdStr = String(test.test_id);
+  const retestKey = `retest1_${studentId}_${test.test_type}_${testIdStr}`;
+  const completionKey = `test_completed_${studentId}_${test.test_type}_${testIdStr}`;
+
+  // Set retest key BEFORE navigation (web app pattern)
+  await AsyncStorage.setItem(retestKey, 'true');
+  console.log('🎓 Set retest key:', retestKey);
+
+  // Clear completion key so test doesn't show as completed (web app pattern)
+  await AsyncStorage.removeItem(completionKey);
+  console.log('🎓 Cleared completion key for retest:', completionKey);
+
+  // Store retest_assignment_id for submission (web app pattern)
+  if (test.retest_assignment_id) {
+    const retestAssignKey = `retest_assignment_id_${studentId}_${test.test_type}_${testIdStr}`;
+    await AsyncStorage.setItem(retestAssignKey, test.retest_assignment_id.toString());
+    console.log('🎓 Set retest assignment ID:', retestAssignKey, '=', test.retest_assignment_id);
+  }
+
+  // Clear per-test cached data (web app pattern)
+  try {
+    // Common prefixes for saved answers/state across tests
+    const suffix = `_${studentId}_${test.test_type}_${testIdStr}`;
+    const allKeys = await AsyncStorage.getAllKeys();
+    const toDelete = allKeys.filter(key => {
+      if (!key) return false;
+      return (
+        key.endsWith(suffix) ||
+        key.includes(`answers_${studentId}_${test.test_type}_${testIdStr}`) ||
+        key.includes(`progress_${studentId}_${test.test_type}_${testIdStr}`) ||
+        key.includes(`state_${studentId}_${test.test_type}_${testIdStr}`) ||
+        key.includes(`selected_${studentId}_${test.test_type}_${testIdStr}`) ||
+        key.includes(`anti_cheating_${studentId}_${test.test_type}_${testIdStr}`) ||
+        key.includes(`speaking_test_data_${studentId}_${testIdStr}`) ||
+        key.includes(`speaking_progress_${testIdStr}`)
+      );
+    });
+    
+    for (const key of toDelete) {
+      await AsyncStorage.removeItem(key);
+    }
+    console.log('🎓 Cleared cached keys for retest start:', toDelete);
+  } catch (e) {
+    console.warn('Error clearing cached keys for retest:', e);
+  }
+}
+

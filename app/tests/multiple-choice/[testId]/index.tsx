@@ -84,16 +84,26 @@ export default function MultipleChoiceTestScreen() {
   }, []);
 
   // Check if test is already completed (web app pattern)
+  // IMPORTANT: Allow retests even if test is marked as completed
   const checkTestCompleted = useCallback(async () => {
     if (!user?.student_id || !testId) return false;
     
     try {
-      const completionKey = `test_completed_${user.student_id}_multiple_choice_${testId}`;
-      const isCompleted = await AsyncStorage.getItem(completionKey);
+      // Check for retest key first - if retest is available, allow access (web app pattern)
       const retestKey = `retest1_${user.student_id}_multiple_choice_${testId}`;
       const hasRetest = await AsyncStorage.getItem(retestKey);
       
-      if (isCompleted === 'true' && hasRetest !== 'true') {
+      // If retest is available, allow access even if test is completed
+      if (hasRetest === 'true') {
+        console.log('🎓 Retest available - allowing access even if test is completed');
+        return false; // Don't block retests
+      }
+      
+      // Only check completion if no retest is available
+      const completionKey = `test_completed_${user.student_id}_multiple_choice_${testId}`;
+      const isCompleted = await AsyncStorage.getItem(completionKey);
+      
+      if (isCompleted === 'true') {
         Alert.alert('Test Completed', 'This test has already been completed', [
           { text: 'OK', onPress: () => router.back() }
         ]);
@@ -251,79 +261,6 @@ export default function MultipleChoiceTestScreen() {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
   }, [testId]);
-
-  // Timer effect - only start if test has timer enabled
-  useEffect(() => {
-    if (!testData || !questions.length || !user?.student_id) return;
-    
-    // Only start timer if test has a time limit set
-    const allowedTime = testData.allowed_time || testData.time_limit;
-    if (allowedTime && allowedTime > 0) {
-      const timerKey = `test_timer_${user.student_id}_multiple_choice_${testId}`;
-      
-      // Load cached timer state
-      const loadTimerState = async () => {
-        try {
-          const cached = await AsyncStorage.getItem(timerKey);
-          const now = Date.now();
-          if (cached) {
-            const parsed = JSON.parse(cached);
-            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
-            const remaining = Math.max(0, Number(parsed.remainingSeconds || allowedTime) - Math.max(0, drift));
-            setTimeElapsed(allowedTime - remaining);
-            return remaining;
-          } else {
-            // Initialize new timer
-            await AsyncStorage.setItem(timerKey, JSON.stringify({
-              remainingSeconds: allowedTime,
-              lastTickAt: new Date(now).toISOString(),
-              startedAt: new Date(now).toISOString()
-            }));
-            return allowedTime;
-          }
-        } catch (e) {
-          console.error('Timer cache init error:', e);
-          return allowedTime;
-        }
-      };
-
-      let remainingTime = allowedTime;
-      loadTimerState().then(remaining => {
-        remainingTime = remaining;
-      });
-
-      const timer = setInterval(async () => {
-        remainingTime -= 1;
-        setTimeElapsed(allowedTime - remainingTime);
-        
-        // Save timer state
-        try {
-          await AsyncStorage.setItem(timerKey, JSON.stringify({
-            remainingSeconds: remainingTime,
-            lastTickAt: new Date().toISOString(),
-            startedAt: new Date().toISOString()
-          }));
-        } catch (e) {
-          console.error('Timer save error:', e);
-        }
-        
-        // Auto-submit when time runs out
-        if (remainingTime <= 0) {
-          clearInterval(timer);
-          Alert.alert(
-            'Time Up!',
-            'The test time has expired. Your answers will be submitted automatically.',
-            [{ text: 'OK', onPress: () => handleSubmit() }]
-          );
-        }
-      }, 1000);
-
-      return () => {
-        clearInterval(timer);
-      };
-    }
-    // If no timer, don't start anything
-  }, [testData, questions.length, user?.student_id]);
 
   // Handle answer change
   const handleAnswerChange = useCallback((questionId: string | number, answer: any) => {
@@ -502,14 +439,84 @@ export default function MultipleChoiceTestScreen() {
         'Submission Error',
         error.message || 'Failed to submit test. Please try again.',
         [
-          { text: 'Retry', onPress: () => handleSubmit() },
+          { text: 'Retry', onPress: () => setShowSubmitModal(true) },
           { text: 'Cancel', style: 'cancel' }
         ]
       );
     } finally {
       setIsSubmitting(false);
     }
-  }, [user?.student_id, testData, questions, answers, testId]);
+  }, [user?.student_id, testData, questions, answers, testId, caughtCheating, visibilityChangeTimes, isLoadingUser]);
+
+  // Timer effect - only start if test has timer enabled
+  useEffect(() => {
+    if (!testData || !questions.length || !user?.student_id) return;
+    
+    // Only start timer if test has a time limit set
+    const allowedTime = testData.allowed_time || testData.time_limit;
+    if (allowedTime && allowedTime > 0) {
+      const timerKey = `test_timer_${user.student_id}_multiple_choice_${testId}`;
+      
+      // Load cached timer state
+      const loadTimerState = async () => {
+        try {
+          const cached = await AsyncStorage.getItem(timerKey);
+          const now = Date.now();
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
+            const remaining = Math.max(0, Number(parsed.remainingSeconds || allowedTime) - Math.max(0, drift));
+            setTimeElapsed(allowedTime - remaining);
+            return remaining;
+          } else {
+            // Initialize new timer
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: allowedTime,
+              lastTickAt: new Date(now).toISOString(),
+              startedAt: new Date(now).toISOString()
+            }));
+            return allowedTime;
+          }
+        } catch (e) {
+          console.error('Timer cache init error:', e);
+          return allowedTime;
+        }
+      };
+
+      let remainingTime = allowedTime;
+      loadTimerState().then(remaining => {
+        remainingTime = remaining;
+      });
+
+      const timer = setInterval(async () => {
+        remainingTime -= 1;
+        setTimeElapsed(allowedTime - remainingTime);
+        
+        // Save timer state
+        try {
+          await AsyncStorage.setItem(timerKey, JSON.stringify({
+            remainingSeconds: remainingTime,
+            lastTickAt: new Date().toISOString(),
+            startedAt: new Date().toISOString()
+          }));
+        } catch (e) {
+          console.error('Timer save error:', e);
+        }
+        
+        // Auto-submit when time runs out - no popup, direct submission
+        if (remainingTime <= 0) {
+          clearInterval(timer);
+          // Directly submit without any confirmation
+          submitTest();
+        }
+      }, 1000);
+
+      return () => {
+        clearInterval(timer);
+      };
+    }
+    // If no timer, don't start anything
+  }, [testData, questions.length, user?.student_id, submitTest, testId]);
 
   if (loading) {
     return (
@@ -708,7 +715,7 @@ export default function MultipleChoiceTestScreen() {
                     ? 'bg-blue-600' 
                     : 'bg-[#8B5CF6]'
                 }`}
-                onPress={() => setShowSubmitModal(true)}
+                onPress={() => router.back()}
               >
                 <Text className={`text-center font-semibold text-lg ${
                   themeMode === 'cyberpunk' 
@@ -721,16 +728,6 @@ export default function MultipleChoiceTestScreen() {
             </View>
           </View>
         </ScrollView>
-        {/* Navigation confirmation modal */}
-        <SubmitModal
-          visible={showResults && showSubmitModal}
-          onConfirm={() => {
-            setShowSubmitModal(false);
-            router.back();
-          }}
-          onCancel={() => setShowSubmitModal(false)}
-          testName={testResults?.testName || 'Test'}
-        />
       </View>
     );
   }

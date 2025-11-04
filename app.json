@@ -19,8 +19,7 @@
     "fonts": [
       "./assets/fonts/BlenderProBook.woff2",
       "./assets/fonts/Oxanium.woff2",
-      "./assets/fonts/Cyberpunk.otf",
-      "./assets/fonts/Hacked.ttf"
+      "./assets/fonts/Cyberpunk.otf"
     ],
     "ios": {
       "supportsTablet": true,

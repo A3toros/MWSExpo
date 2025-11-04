@@ -30,6 +30,7 @@ export default function TestRunnerScreen() {
   const [questions, setQuestions] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [seconds, setSeconds] = useState(0);
+  const [timeElapsed, setTimeElapsed] = useState(0);
   const [testResults, setTestResults] = useState<any>(null);
   const [showResults, setShowResults] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -43,6 +44,7 @@ export default function TestRunnerScreen() {
   const [caughtCheating, setCaughtCheating] = useState(false);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const resultsCommittedRef = useRef<boolean>(false);
+  const restorationDoneRef = useRef<string | null>(null); // Track which test was restored
 
   // Simple student ID extraction from JWT (like multiple-choice test)
   const getStudentIdFromToken = async (): Promise<string | null> => {
@@ -58,8 +60,35 @@ export default function TestRunnerScreen() {
             const val = String(answers[qid] ?? '').trim().toLowerCase();
             const list = Array.isArray(q?.correct_answers) ? q.correct_answers : (q?.correct_answer ? [q.correct_answer] : []);
             const normalized = list.map((s: any) => String(s ?? '').trim().toLowerCase()).filter(Boolean);
-            if (val.length > 0 && normalized.length > 0 && normalized.includes(val)) {
-              correct += 1;
+            
+            // Check if answer is correct
+            if (val.length > 0 && normalized.length > 0) {
+              const isCorrect = normalized.some((correctAns: string) => {
+                // First check for exact match (backward compatibility)
+                if (val === correctAns) {
+                  return true;
+                }
+                
+                // Then check if trimmed correct answer is present in trimmed student answer
+                // This accepts answers with extra letters/numbers (e.g., "Paris123" contains "Paris")
+                if (correctAns && val.includes(correctAns)) {
+                  // For single character answers, only match if at start/end (to avoid false positives like "a" in "cat")
+                  // For multi-character answers, accept any substring match
+                  if (correctAns.length === 1) {
+                    // Single character: must be at start or end of answer
+                    return val.startsWith(correctAns) || val.endsWith(correctAns);
+                  } else {
+                    // Multi-character: accept substring match
+                    return true;
+                  }
+                }
+                
+                return false;
+              });
+              
+              if (isCorrect) {
+                correct += 1;
+              }
             }
           }
           return correct;
@@ -109,85 +138,159 @@ export default function TestRunnerScreen() {
     loadUserData();
   }, [dispatch, user]);
 
+  // Load test data - use ref to prevent multiple loads
+  const loadTestDataRef = useRef<string | null>(null);
+  const isLoadingRef = useRef<boolean>(false);
+  
+  // Track last loaded test to prevent re-loading
+  const lastLoadedTestRef = useRef<string | null>(null);
+  
   useEffect(() => {
+    
     // Check test completion
     (async () => {
       try {
-        
         // Check if test is already completed (web app pattern)
+        // IMPORTANT: Allow retests even if test is marked as completed
         if (user?.student_id && testId && type) {
-          const completionKey = `test_completed_${user.student_id}_${type}_${testId}`;
-          const isCompleted = await AsyncStorage.getItem(completionKey);
+          // Check for retest key first - if retest is available, allow access (web app pattern)
           const retestKey = `retest1_${user.student_id}_${type}_${testId}`;
           const hasRetest = await AsyncStorage.getItem(retestKey);
           
-        if (isCompleted === 'true' && hasRetest !== 'true') {
-          Alert.alert('Test Completed', 'This test has already been completed', [
-            { text: 'OK', onPress: () => router.back() }
-          ]);
-          return;
-        }
+          // If retest is available, allow access even if test is completed
+          if (hasRetest === 'true') {
+            console.log('🎓 Retest available - allowing access even if test is completed');
+            return; // Don't block retests
+          }
+          
+          // Only check completion if no retest is available
+          const completionKey = `test_completed_${user.student_id}_${type}_${testId}`;
+          const isCompleted = await AsyncStorage.getItem(completionKey);
+          
+          if (isCompleted === 'true') {
+            Alert.alert('Test Completed', 'This test has already been completed', [
+              { text: 'OK', onPress: () => router.back() }
+            ]);
+            return;
+          }
         }
       } catch {}
     })();
 
+    // Prevent multiple loads for the same test - check if already loaded
+    const testKey = testId && type ? `${testId}_${type}` : null;
+    if (!testId || !type || !testKey) {
+      return;
+    }
+    
+    // CRITICAL: Atomic check-and-set to prevent race conditions
+    // If ref is already set, skip. Otherwise, set it atomically.
+    if (lastLoadedTestRef.current === testKey) {
+      return;
+    }
+    
+    // If already loading or loaded for this test, skip
+    if (loadTestDataRef.current === testKey || isLoadingRef.current) {
+      return;
+    }
+
+    // ATOMIC: Set ref immediately - prevents concurrent executions
+    // If another execution is running, it will see this ref and skip
+    lastLoadedTestRef.current = testKey;
+    loadTestDataRef.current = testKey;
+    isLoadingRef.current = true;
+    
+    // DO NOT reset restoration ref here - it causes the loop!
+    // Only reset when testId/type actually changes (handled elsewhere)
+    // The ref should persist across multiple load() calls for the same test
+
     const load = async () => {
-      setError(null);
-      setLoading(true);
-        try {
-          console.log('Loading test questions for:', { test_type: type, test_id: testId });
-          // Copy web app exactly - use get-test-questions for all test types
-          const res = await api.get('/api/get-test-questions', { 
-            params: { test_type: type, test_id: testId } 
-          });
-          console.log('API response:', res.data);
+      // CRITICAL: Check if already loaded for this test BEFORE any async operations
+      const currentTestId = String(testId);
+      const restoreTestKey = `${currentTestId}_${type}`;
+      if (restorationDoneRef.current === restoreTestKey && testData && questions.length > 0) {
+        return;
+      }
+      
+      try {
+        setError(null);
+        setLoading(true);
+        
+        const res = await api.get('/api/get-test-questions', { 
+          params: { test_type: type, test_id: testId } 
+        });
+        
+        if (res.data.success) {
+          const qs = res.data.questions ?? [];
+          setTestData(res.data.test_info || res.data.data);
+          setQuestions(qs);
+          const order = qs.map((q: any, idx: number) => q?.id ?? idx);
+          dispatch(startTest({ testId: String(testId), type: String(type || ''), questionOrder: order }));
+
+          // Restore saved progress - ONLY ONCE per test load
+          // restoreTestKey is already calculated above
           
-          if (res.data.success) {
-            const qs = res.data.questions ?? [];
-            setTestData(res.data.test_info || res.data.data);
-            setQuestions(qs);
-            const order = qs.map((q: any, idx: number) => q?.id ?? idx);
-            dispatch(startTest({ testId: String(testId), type: String(type || ''), questionOrder: order }));
-
-            // Attempt to restore saved progress using web app pattern
-            try {
-              // Use user from store for progress loading
-              if (user?.student_id) {
-                const progressKey = `test_progress_${user.student_id}_${type}_${testId}`;
-                const savedRaw = await AsyncStorage.getItem(progressKey);
-                if (savedRaw) {
-                  const saved = JSON.parse(savedRaw);
-                  if (saved?.answers) {
-                    dispatch(hydrateFromStorage({
-                      answers: saved.answers,
-                      currentIndex: saved.currentIndex ?? 0,
-                      elapsedSeconds: saved.seconds ?? 0,
-                      startedAt: saved.startedAt ?? null,
-                      questionOrder: order,
-                      lastPersistedAt: saved.timestamp ?? null,
-                    }));
-                  }
-                }
-              }
-            } catch (restoreErr) {
-              console.warn('Restore failed:', restoreErr);
-            }
+          // ATOMIC: Check and set restoration ref to prevent race conditions
+          // If already restored, skip. Otherwise, set ref immediately.
+          if (restorationDoneRef.current === restoreTestKey) {
+            // Already restored
           } else {
-            throw new Error(res.data.error || 'Failed to get test questions');
+            // ATOMIC: Set ref IMMEDIATELY before any async work
+            // This prevents concurrent restoration attempts
+            restorationDoneRef.current = restoreTestKey;
+            
+            if (user?.student_id) {
+              // Restore asynchronously - ref already set, so concurrent calls will skip
+              (async () => {
+                try {
+                  const progressKey = `test_progress_${user.student_id}_${type}_${testId}`;
+                  const savedRaw = await AsyncStorage.getItem(progressKey);
+                  
+                  if (savedRaw) {
+                    const saved = JSON.parse(savedRaw);
+                    if (saved?.answers) {
+                      dispatch(hydrateFromStorage({
+                        answers: saved.answers,
+                        currentIndex: saved.currentIndex ?? 0,
+                        elapsedSeconds: saved.seconds ?? 0,
+                        startedAt: saved.startedAt ?? null,
+                        questionOrder: order,
+                        lastPersistedAt: saved.timestamp ?? null,
+                      }));
+                    }
+                  }
+                } catch (restoreErr) {
+                  console.warn('Restore failed:', restoreErr);
+                }
+              })();
+            }
           }
-        } catch (e: any) {
-          console.error('Failed to load test questions:', e?.message);
-          console.error('Full error:', e);
-          console.error('Error response:', e?.response?.data);
-          setError(`Failed to load test questions: ${e?.message || 'Unknown error'}`);
-        } finally {
-          setLoading(false);
+        } else {
+          throw new Error(res.data.error || 'Failed to get test questions');
         }
+      } catch (e: any) {
+        console.error('Failed to load test questions:', e?.message);
+        console.error('Full error:', e);
+        console.error('Error response:', e?.response?.data);
+        setError(`Failed to load test questions: ${e?.message || 'Unknown error'}`);
+        // On error, allow retry by clearing the ref
+        if (lastLoadedTestRef.current === testKey) {
+          lastLoadedTestRef.current = null;
+        }
+      } finally {
+        setLoading(false);
+        isLoadingRef.current = false;
+      }
     };
-    if (testId) load();
-  }, [testId, type, user?.student_id]);
+    
+    load();
+    // Only depend on testId and type - user is checked inside but not in deps to avoid loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testId, type]);
 
-  // Auto-save functionality
+  // Auto-save functionality - use ref to avoid dependency issues
+  const autoSaveRefCallback = useRef<() => Promise<void>>();
+  
   const autoSave = useCallback(async () => {
     if (Object.keys(answers).length === 0) return;
     
@@ -197,40 +300,53 @@ export default function TestRunnerScreen() {
       if (!user?.student_id) return;
       
       // Save to AsyncStorage for offline persistence - use web app pattern
+      // Use seconds from state directly (not from dependency)
       const saveData = {
         testId,
         type,
         answers,
         timestamp: Date.now(),
         currentIndex,
-        seconds,
+        seconds, // Use current seconds value
         startedAt: Date.now() - (seconds * 1000)
       };
       const progressKey = `test_progress_${user.student_id}_${type}_${testId}`;
       await AsyncStorage.setItem(progressKey, JSON.stringify(saveData));
       setLastSaved(new Date());
-      console.log('Auto-saved test progress');
     } catch (error) {
       console.error('Auto-save failed:', error);
     } finally {
       setIsSaving(false);
     }
-  }, [answers, testId, type, currentIndex, seconds, user?.student_id]);
+  }, [answers, testId, type, currentIndex, user?.student_id]);
+  
+  // Update ref with latest callback
+  useEffect(() => {
+    autoSaveRefCallback.current = autoSave;
+  }, [autoSave]);
 
+  // Elapsed time timer (only if no countdown timer)
   useEffect(() => {
     if (!loading && !error) {
-      timerRef.current = setInterval(() => {
-        setSeconds((s) => s + 1);
-        dispatch(tickSecond());
-      }, 1000);
-      // Auto-save every 5 seconds
-      autoSaveRef.current = setInterval(autoSave, 5000);
+      // Only run elapsed time timer if there's no countdown timer
+      const allowedTime = testData?.allowed_time || testData?.time_limit;
+      if (!allowedTime || allowedTime <= 0) {
+        // No countdown timer, so track elapsed time
+        timerRef.current = setInterval(() => {
+          setSeconds((s) => s + 1);
+          dispatch(tickSecond());
+        }, 1000);
+      }
+      // Auto-save every 5 seconds (use ref to avoid dependency issues)
+      autoSaveRef.current = setInterval(() => {
+        autoSaveRefCallback.current?.();
+      }, 5000);
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current as any);
       if (autoSaveRef.current) clearInterval(autoSaveRef.current as any);
     };
-  }, [loading, error, autoSave]);
+  }, [loading, error, testData]);
 
   // Anti-cheating tracking (like web app)
   useEffect(() => {
@@ -339,7 +455,6 @@ export default function TestRunnerScreen() {
     const passed = percentage >= 60;
 
     // Create question analysis
-    console.log('🧮 Building local results with answers map:', answers);
     const questionAnalysis = questions.map((q: any, index: number) => {
       const qid = String(q?.id ?? q?.question_id ?? index);
       // Robust lookup: string key, numeric key, and raw question_id
@@ -348,7 +463,6 @@ export default function TestRunnerScreen() {
         answers?.[q?.id as any] ??
         answers?.[q?.question_id as any] ??
         answers?.[String(q?.question_id)] ?? '';
-      console.log('🔗 Map question -> answer', { qid, question_id: q?.question_id, hasValue: value != null, value });
       const qtype = String(q.question_type || '');
       
       let isCorrect = false;
@@ -441,8 +555,32 @@ export default function TestRunnerScreen() {
       const value = answersSnapshot?.[qid] ?? answersSnapshot?.[q?.question_id as any] ?? answersSnapshot?.[String(q?.question_id)] ?? '';
       const userAnswer = String(value || '');
       const list = Array.isArray(q?.correct_answers) ? q.correct_answers : (q?.correct_answer ? [q.correct_answer] : []);
-      const normalized = list.map((s: any) => String(s ?? '').trim().toLowerCase());
-      const isCorrect = userAnswer.trim().length > 0 && normalized.length > 0 && normalized.includes(userAnswer.trim().toLowerCase());
+      const normalized = list.map((s: any) => String(s ?? '').trim().toLowerCase()).filter(Boolean);
+      
+      // Check if answer is correct using partial match logic (same as web app)
+      const trimmedUserAnswer = userAnswer.trim().toLowerCase();
+      const isCorrect = trimmedUserAnswer.length > 0 && normalized.length > 0 && normalized.some((correctAns: string) => {
+        // First check for exact match (backward compatibility)
+        if (trimmedUserAnswer === correctAns) {
+          return true;
+        }
+        
+        // Then check if trimmed correct answer is present in trimmed student answer
+        // This accepts answers with extra letters/numbers (e.g., "Paris123" contains "Paris")
+        if (correctAns && trimmedUserAnswer.includes(correctAns)) {
+          // For single character answers, only match if at start/end (to avoid false positives like "a" in "cat")
+          // For multi-character answers, accept any substring match
+          if (correctAns.length === 1) {
+            // Single character: must be at start or end of answer
+            return trimmedUserAnswer.startsWith(correctAns) || trimmedUserAnswer.endsWith(correctAns);
+          } else {
+            // Multi-character: accept substring match
+            return true;
+          }
+        }
+        
+        return false;
+      });
       return {
         questionNumber: index + 1,
         question: q.question_text || q.question || `Question ${index + 1}`,
@@ -472,6 +610,11 @@ export default function TestRunnerScreen() {
   }, [questions, testData, testId, caughtCheating, visibilityChangeTimes]);
 
   // Handle test submission
+  // Memoize handleAnswerChange to prevent QuestionRenderer useEffect from running repeatedly
+  const handleAnswerChange = useCallback((questionId: string | number, val: any) => {
+    dispatch(setAnswer({ questionId: String(questionId), value: val }));
+  }, [dispatch]);
+
   const handleSubmit = useCallback(async () => {
     if (isLoadingUser) {
       Alert.alert('Please Wait', 'Loading user data...');
@@ -503,7 +646,36 @@ export default function TestRunnerScreen() {
           const val = String(answers[qid] ?? '').trim().toLowerCase();
           const list = Array.isArray(q?.correct_answers) ? q.correct_answers : (q?.correct_answer ? [q.correct_answer] : []);
           const normalized = list.map((s: any) => String(s ?? '').trim().toLowerCase()).filter(Boolean);
-          if (val.length > 0 && normalized.length > 0 && normalized.includes(val)) correct += 1;
+          
+          // Check if answer is correct
+          if (val.length > 0 && normalized.length > 0) {
+            const isCorrect = normalized.some((correctAns: string) => {
+              // First check for exact match (backward compatibility)
+              if (val === correctAns) {
+                return true;
+              }
+              
+              // Then check if trimmed correct answer is present in trimmed student answer
+              // This accepts answers with extra letters/numbers (e.g., "Paris123" contains "Paris")
+              if (correctAns && val.includes(correctAns)) {
+                // For single character answers, only match if at start/end (to avoid false positives like "a" in "cat")
+                // For multi-character answers, accept any substring match
+                if (correctAns.length === 1) {
+                  // Single character: must be at start or end of answer
+                  return val.startsWith(correctAns) || val.endsWith(correctAns);
+                } else {
+                  // Multi-character: accept substring match
+                  return true;
+                }
+              }
+              
+              return false;
+            });
+            
+            if (isCorrect) {
+              correct += 1;
+            }
+          }
         }
         return correct;
       } catch {
@@ -546,15 +718,6 @@ export default function TestRunnerScreen() {
         parent_test_id: testId
       };
 
-      console.log('🔍 Input test submission payload:', JSON.stringify(payload, null, 2));
-      console.log('🔍 testData:', testData);
-      console.log('🔍 questions length:', questions.length);
-      console.log('🔍 answers:', answers);
-      console.log('🔍 testData.test_name:', testData?.test_name);
-      console.log('🔍 testData.teacher_id:', testData?.teacher_id);
-      console.log('🔍 testData.subject_id:', testData?.subject_id);
-      
-      
       // Submit directly to input test endpoint (like multiple-choice test)
       try {
         const response = await api.post('/api/submit-input-test', payload);
@@ -568,7 +731,6 @@ export default function TestRunnerScreen() {
             // Cache the test results immediately after successful submission (web app pattern)
             const cacheKey = `student_results_table_${studentId}`;
             await AsyncStorage.setItem(cacheKey, JSON.stringify(response.data));
-            console.log('🎓 Test results cached with key:', cacheKey);
           }
           
           // Build local detailed analysis from the exact snapshot we submitted
@@ -627,7 +789,90 @@ export default function TestRunnerScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [testId, type, questions, answers, seconds, isLoadingUser, user?.student_id, testData]);
+  }, [testId, type, questions, answers, seconds, isLoadingUser, user?.student_id, testData, caughtCheating, visibilityChangeTimes]);
+
+  // Use ref for handleSubmit to avoid timer effect re-running
+  const handleSubmitRef = useRef<() => Promise<void>>();
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit;
+  }, [handleSubmit]);
+
+  // Timer effect - only start if test has timer enabled
+  const timerInitializedRef = useRef(false);
+  useEffect(() => {
+    if (!testData || !questions.length || !user?.student_id) return;
+    
+    // Only start timer if test has a time limit set
+    const allowedTime = testData.allowed_time || testData.time_limit;
+    if (allowedTime && allowedTime > 0) {
+      // Prevent multiple timer initializations
+      if (timerInitializedRef.current) return;
+      timerInitializedRef.current = true;
+      
+      const timerKey = `test_timer_${user.student_id}_input_${testId}`;
+      
+      // Load cached timer state (only once)
+      const loadTimerState = async () => {
+        try {
+          const cached = await AsyncStorage.getItem(timerKey);
+          const now = Date.now();
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
+            const remaining = Math.max(0, Number(parsed.remainingSeconds || allowedTime) - Math.max(0, drift));
+            setTimeElapsed(allowedTime - remaining);
+            return remaining;
+          } else {
+            // Initialize new timer
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: allowedTime,
+              lastTickAt: new Date(now).toISOString(),
+              startedAt: new Date(now).toISOString()
+            }));
+            return allowedTime;
+          }
+        } catch (e) {
+          console.error('Timer cache init error:', e);
+          return allowedTime;
+        }
+      };
+
+      let remainingTime = allowedTime;
+      loadTimerState().then(remaining => {
+        remainingTime = remaining;
+      });
+
+      const countdownTimer = setInterval(async () => {
+        remainingTime -= 1;
+        setTimeElapsed(allowedTime - remainingTime);
+        
+        // Save timer state
+        try {
+          await AsyncStorage.setItem(timerKey, JSON.stringify({
+            remainingSeconds: remainingTime,
+            lastTickAt: new Date().toISOString(),
+            startedAt: new Date().toISOString()
+          }));
+        } catch (e) {
+          console.error('Timer save error:', e);
+        }
+        
+        // Auto-submit when time runs out - no popup, direct submission
+        if (remainingTime <= 0) {
+          clearInterval(countdownTimer);
+          timerInitializedRef.current = false; // Reset for retake
+          // Directly submit without any confirmation
+          handleSubmitRef.current?.();
+        }
+      }, 1000);
+
+      return () => {
+        clearInterval(countdownTimer);
+        timerInitializedRef.current = false; // Reset when effect cleans up
+      };
+    }
+    // If no timer, don't start anything
+  }, [testData, questions.length, user?.student_id, testId]);
 
   // Show test results if available
   if (showResults && testResults) {
@@ -661,21 +906,10 @@ export default function TestRunnerScreen() {
             answeredCount={answeredCount}
             totalQuestions={questions.length}
             percentage={questions.length > 0 ? Math.round((answeredCount / questions.length) * 100) : 0}
-            timeElapsed={seconds}
+            timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
           />
         </View>
         
-        {isSaving && (
-          <View className="flex-row items-center justify-center bg-blue-50 mx-4 mb-4 p-3 rounded-lg">
-            <ActivityIndicator size="small" color="#2563eb" />
-            <Text className="text-blue-600 ml-2">Auto-saving...</Text>
-          </View>
-        )}
-        {lastSaved && !isSaving && (
-          <Text className="text-gray-500 text-center text-sm mb-4">
-            Last saved: {lastSaved.toLocaleTimeString()}
-          </Text>
-        )}
         
         {submitError && (
           <View className="bg-red-50 border border-red-200 rounded-lg p-4 mx-4 mb-4">
@@ -700,11 +934,6 @@ export default function TestRunnerScreen() {
               // Ensure each question has a unique ID
               const qid = q?.id ?? q?.question_id ?? `q_${index}`;
               const value = answers[String(qid)] as any;
-              const onChange = (questionId: string | number, val: any) => {
-                console.log('➡️ setAnswer dispatch', { questionId: String(questionId), value: val, len: (val ?? '').length });
-                dispatch(setAnswer({ questionId: String(questionId), value: val }));
-              };
-              
               
               return (
                 <View key={`question_${qid}_${index}`} className="mb-6">
@@ -715,7 +944,7 @@ export default function TestRunnerScreen() {
                     displayNumber={index + 1}
                     studentId={user?.student_id || ''}
                     value={value}
-                    onChange={onChange}
+                    onChange={handleAnswerChange}
                   />
                 </View>
               );
@@ -770,12 +999,10 @@ export default function TestRunnerScreen() {
       <SubmitModal
         visible={showSubmitModal}
         onConfirm={() => {
-          console.log('🔍 SubmitModal onConfirm called');
           setShowSubmitModal(false);
           handleSubmit();
         }}
         onCancel={() => {
-          console.log('🔍 SubmitModal onCancel called');
           setShowSubmitModal(false);
         }}
         testName={testData?.test_name || `Test #${testId}`}

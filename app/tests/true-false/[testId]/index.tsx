@@ -104,20 +104,30 @@ export default function TrueFalseTestScreen() {
     loadUserData();
   }, []);
 
-  // Check if test is already completed
+  // Check if test is already completed (web app pattern)
+  // IMPORTANT: Allow retests even if test is marked as completed
   const checkTestCompleted = useCallback(async () => {
     if (!user?.student_id || !testId) return false;
     
     try {
+      // Check for retest key first - if retest is available, allow access (web app pattern)
+      const retestKey = `retest1_${user.student_id}_true_false_${testId}`;
+      const hasRetest = await AsyncStorage.getItem(retestKey);
+      
+      // If retest is available, allow access even if test is completed
+      if (hasRetest === 'true') {
+        console.log('🎓 Retest available - allowing access even if test is completed');
+        return false; // Don't block retests
+      }
+      
+      // Only check completion if no retest is available
       const completionKey = `test_completed_${user.student_id}_true_false_${testId}`;
       const isCompleted = await AsyncStorage.getItem(completionKey);
-      const retestKey = `retest1_${user.student_id}_true_false_${testId}`;
-      const isRetest = await AsyncStorage.getItem(retestKey);
       
-      if (isCompleted && !isRetest) {
+      if (isCompleted === 'true') {
         Alert.alert(
-          'Test Already Completed',
-          'This test has already been completed. You cannot retake it.',
+          'Test Completed',
+          'This test has already been completed',
           [{ text: 'OK', onPress: () => router.back() }]
         );
         return true;
@@ -329,14 +339,11 @@ export default function TrueFalseTestScreen() {
           console.error('Timer save error:', e);
         }
         
-        // Auto-submit when time runs out
+        // Auto-submit when time runs out - no popup, direct submission
         if (remainingTime <= 0) {
           clearInterval(timer);
-          Alert.alert(
-            'Time Up!',
-            'The test time has expired. Your answers will be submitted automatically.',
-            [{ text: 'OK', onPress: () => handleSubmit() }]
-          );
+          // Directly submit without any confirmation
+          submitTest();
         }
       }, 1000);
 
@@ -345,7 +352,7 @@ export default function TrueFalseTestScreen() {
       };
     }
     // If no timer, don't start anything
-  }, [testData, questions.length, user?.student_id]);
+  }, [testData, questions.length, user?.student_id, submitTest]);
 
   // Handle answer change
   const handleAnswerChange = useCallback((questionId: string | number, answer: any) => {
@@ -405,6 +412,13 @@ export default function TrueFalseTestScreen() {
       questions.forEach((question, index) => {
         // Convert student answer to boolean (like web app)
         const studentAnswer = answers[index]?.trim().toLowerCase();
+        
+        // Only check if student actually answered (not empty)
+        if (!studentAnswer || (studentAnswer !== 'true' && studentAnswer !== 'false')) {
+          // Unanswered or invalid answer - skip (counts as incorrect)
+          return;
+        }
+        
         const studentAnswerBool = studentAnswer === 'true';
         
         // Direct boolean comparison (like web app)
@@ -467,7 +481,13 @@ export default function TrueFalseTestScreen() {
             questionText: question.question,
             correctAnswer: question.correct_answer || '',
             studentAnswer: answers[index] || '',
-            isCorrect: ((answers[index]?.trim().toLowerCase() === 'true') === question.correct_answer)
+            isCorrect: (() => {
+              const studentAnswer = answers[index]?.trim().toLowerCase();
+              if (!studentAnswer || (studentAnswer !== 'true' && studentAnswer !== 'false')) {
+                return false; // Unanswered or invalid = incorrect
+              }
+              return (studentAnswer === 'true') === question.correct_answer;
+            })()
           }))
         };
         

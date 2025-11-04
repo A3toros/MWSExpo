@@ -42,6 +42,16 @@ export default function MatchingTestScreen() {
   const [showSubmitModal, setShowSubmitModal] = useState(false); // confirms submission
   const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
   const [caughtCheating, setCaughtCheating] = useState(false);
+  const [timeElapsed, setTimeElapsed] = useState(0);
+  const [studentId, setStudentId] = useState<string | null>(null);
+  
+  // Timer refs to prevent re-initialization
+  const timerInitializedRef = useRef<boolean>(false);
+  const performSubmitRef = useRef<() => Promise<void>>();
+  const remainingTimeRef = useRef<number>(0);
+  const timerStartedAtRef = useRef<string>('');
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  
   const DEBUG_MATCHING = true;
   const DROP_MARGIN = 12;
   const DEBUG_SUBMIT = true;
@@ -64,16 +74,64 @@ export default function MatchingTestScreen() {
   };
 
   // Check if test is already completed (web app pattern)
+  // IMPORTANT: Allow retests even if test is marked as completed
   const checkTestCompleted = useCallback(async () => {
-    if (!user?.student_id || !testId) return false;
+    if (!testId) return false;
     
     try {
-      const completionKey = `test_completed_${user.student_id}_matching_type_${testId}`;
-      const isCompleted = await AsyncStorage.getItem(completionKey);
-      const retestKey = `retest1_${user.student_id}_matching_type_${testId}`;
+      // Enhanced student ID extraction with multiple fallbacks (same as other tests)
+      let studentId = user?.student_id;
+      
+      if (!studentId) {
+        // Try JWT token first
+        try {
+          const token = await AsyncStorage.getItem('auth_token');
+          if (token) {
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(atob(parts[1]));
+              studentId = payload.student_id || payload.id || payload.user_id || payload.username || payload.email;
+            }
+          }
+        } catch (e) {
+          console.log('JWT extraction failed:', e);
+        }
+        
+        // Fallback to AsyncStorage
+        if (!studentId) {
+          const userData = await AsyncStorage.getItem('user');
+          const userFromStorage = userData ? JSON.parse(userData) : null;
+          studentId = userFromStorage?.student_id || userFromStorage?.id || userFromStorage?.user_id || userFromStorage?.username || userFromStorage?.email;
+        }
+        
+        // Try auth_user key if still no ID
+        if (!studentId) {
+          const authUserData = await AsyncStorage.getItem('auth_user');
+          const authUser = authUserData ? JSON.parse(authUserData) : null;
+          studentId = authUser?.student_id || authUser?.id || authUser?.user_id || authUser?.username || authUser?.email;
+        }
+      }
+      
+      if (!studentId) {
+        console.warn('Student ID not found - cannot check completion');
+        return false; // Allow test if we can't check
+      }
+      
+      // Check for retest key first - if retest is available, allow access (web app pattern)
+      const retestKey = `retest1_${studentId}_matching_type_${testId}`;
       const hasRetest = await AsyncStorage.getItem(retestKey);
       
-      if (isCompleted === 'true' && hasRetest !== 'true') {
+      // If retest is available, allow access even if test is completed
+      if (hasRetest === 'true') {
+        console.log('🎓 Retest available - allowing access even if test is completed');
+        return false; // Don't block retests
+      }
+      
+      // Only check completion if no retest is available
+      const completionKey = `test_completed_${studentId}_matching_type_${testId}`;
+      const isCompleted = await AsyncStorage.getItem(completionKey);
+      
+      if (isCompleted === 'true') {
         Alert.alert('Test Completed', 'This test has already been completed', [
           { text: 'OK', onPress: () => router.back() }
         ]);
@@ -113,6 +171,15 @@ export default function MatchingTestScreen() {
       }
 
       const test = testResponse.data.data;
+      console.log('📊 [MATCHING TEST DATA]', {
+        test_id: test?.id || test?.test_id,
+        test_name: test?.test_name,
+        allowed_time: test?.allowed_time,
+        time_limit: test?.time_limit,
+        enableTimer: test?.enableTimer,
+        timerMinutes: test?.timerMinutes,
+        allKeys: Object.keys(test || {})
+      });
       setTestData(test);
       // Set arrows from test payload (mirror web app) with robust parsing
       try {
@@ -261,11 +328,22 @@ export default function MatchingTestScreen() {
   const handleWordPlacement = useCallback((wordId: string | number, blockId: string | number) => {
     const key = String(blockId);
     const val = String(wordId);
-    setPlacedWords(prev => ({
-      ...prev,
-      [key]: val,
-    }));
-  }, []);
+    setPlacedWords(prev => {
+      const updated = {
+        ...prev,
+        [key]: val,
+      };
+      // Auto-save progress
+      if (studentId) {
+        const progressKey = `test_progress_${studentId}_matching_type_${testId}`;
+        AsyncStorage.setItem(progressKey, JSON.stringify({
+          placedWords: updated,
+          savedAt: new Date().toISOString()
+        })).catch(e => console.error('Auto-save failed:', e));
+      }
+      return updated;
+    });
+  }, [studentId, testId]);
 
   // Handle word tap to place in first available block
   const handleWordTap = useCallback((wordId: string) => {
@@ -284,9 +362,14 @@ export default function MatchingTestScreen() {
   // Confirm reset
   const confirmReset = useCallback(() => {
     setPlacedWords({});
+    // Clear saved progress
+    if (studentId) {
+      const progressKey = `test_progress_${studentId}_matching_type_${testId}`;
+      AsyncStorage.removeItem(progressKey).catch(e => console.error('Failed to clear progress:', e));
+    }
     setShowResetModal(false);
     if (DEBUG_MATCHING) console.log('Matching RN: reset confirmed');
-  }, []);
+  }, [studentId, testId]);
 
   // Cancel reset
   const cancelReset = useCallback(() => {
@@ -387,6 +470,16 @@ export default function MatchingTestScreen() {
         }
       });
       
+      // Build answers object with ALL blocks - use null for unanswered blocks (like other tests)
+      const answers: Record<string, string | null> = {};
+      blocks.forEach(block => {
+        const blockId = String(block.id);
+        const placedWordId = placedWords[blockId];
+        // Include null for blocks without words placed (unanswered)
+        // Convert to string if it's a number, otherwise use null
+        answers[blockId] = placedWordId ? String(placedWordId) : null;
+      });
+      
       // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
       const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
       const retestAssignmentId = await getRetestAssignmentId(studentId, 'matching_type', testIdStr);
@@ -398,10 +491,10 @@ export default function MatchingTestScreen() {
         subject_id: testData.subject_id,
         student_id: studentId,
         academic_period_id: academic_period_id,
-        answers: placedWords,
+        answers: answers,
         score: correctPlacements,
         maxScore: blocks.length,
-        time_taken: 0, // TODO: Add timer like web app
+        time_taken: timeElapsed,
         started_at: new Date().toISOString(),
         submitted_at: new Date().toISOString(),
         caught_cheating: caughtCheating,
@@ -442,7 +535,212 @@ export default function MatchingTestScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [user?.student_id, testId, testData, blocks, placedWords]);
+  }, [user?.student_id, testId, testData, blocks, placedWords, caughtCheating, visibilityChangeTimes, timeElapsed]);
+
+  // Store performSubmit in ref to avoid dependency issues
+  useEffect(() => {
+    performSubmitRef.current = performSubmit;
+  }, [performSubmit]);
+
+  // Extract student ID once on mount
+  useEffect(() => {
+    const extractStudentId = async () => {
+      let id: string | number | null = user?.student_id || null;
+      if (!id) {
+        try {
+          const token = await AsyncStorage.getItem('auth_token');
+          if (token) {
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(atob(parts[1]));
+              id = payload.student_id || payload.id || null;
+            }
+          }
+        } catch {}
+      }
+      if (!id) {
+        try {
+          const authUserStr = await AsyncStorage.getItem('auth_user');
+          const authUser = authUserStr ? JSON.parse(authUserStr) : null;
+          id = authUser?.student_id || authUser?.id || null;
+        } catch {}
+      }
+      setStudentId(id ? String(id) : null);
+      
+      // Restore progress once studentId is available
+      if (id && testId && blocks.length > 0) {
+        try {
+          const progressKey = `test_progress_${id}_matching_type_${testId}`;
+          const savedProgress = await AsyncStorage.getItem(progressKey);
+          if (savedProgress) {
+            const parsed = JSON.parse(savedProgress);
+            if (parsed.placedWords && typeof parsed.placedWords === 'object') {
+              setPlacedWords(parsed.placedWords);
+              if (DEBUG_MATCHING) console.log('Matching RN: restored progress from studentId effect', parsed.placedWords);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to restore progress:', e);
+        }
+      }
+    };
+    extractStudentId();
+  }, [user?.student_id, testId, blocks.length]);
+
+  // Timer effect - only start if test has timer enabled
+  useEffect(() => {
+    console.log('⏰ [TIMER] Effect triggered', { 
+      hasTestData: !!testData, 
+      blocksLength: blocks.length, 
+      studentId: studentId,
+      testId 
+    });
+    
+    if (!testData || !blocks.length || !studentId) {
+      console.log('⏰ [TIMER] Skipping - missing requirements', { 
+        testData: !!testData, 
+        blocks: blocks.length, 
+        studentId: !!studentId 
+      });
+      return;
+    }
+    
+    // Only start timer if test has a time limit set
+    const allowedTime = testData.allowed_time || testData.time_limit;
+    console.log('⏰ [TIMER] Checking timer', { 
+      allowedTime, 
+      allowed_time: testData.allowed_time,
+      time_limit: testData.time_limit,
+      testDataKeys: Object.keys(testData || {}),
+      timerInitialized: timerInitializedRef.current 
+    });
+    
+    if (allowedTime && allowedTime > 0) {
+      // Prevent multiple timer initializations
+      if (timerInitializedRef.current) {
+        console.log('⏰ [TIMER] Already initialized - skipping');
+        return;
+      }
+      
+      // CRITICAL: Set ref immediately before any async work to prevent race conditions
+      timerInitializedRef.current = true;
+      console.log('⏰ [TIMER] Starting timer initialization', { allowedTime });
+      
+      const timerKey = `test_timer_${studentId}_matching_type_${testId}`;
+      console.log('⏰ [TIMER] Timer key:', timerKey);
+      
+      // Load cached timer state
+      const loadTimerState = async () => {
+        console.log('⏰ [TIMER] Loading timer state...');
+        try {
+          const cached = await AsyncStorage.getItem(timerKey);
+          const now = Date.now();
+          if (cached) {
+            console.log('⏰ [TIMER] Found cached timer state');
+            const parsed = JSON.parse(cached);
+            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
+            const cachedRemaining = Number(parsed.remainingSeconds || allowedTime);
+            const remaining = Math.max(0, cachedRemaining - Math.max(0, drift));
+            console.log('⏰ [TIMER] Cached state loaded', { remaining, drift, cachedRemaining });
+            
+            // If timer expired (remaining <= 0), start fresh timer instead
+            if (remaining <= 0) {
+              console.log('⏰ [TIMER] Cached timer expired - starting fresh timer');
+              // Clear expired cache and start new timer
+              const startedAt = new Date(now).toISOString();
+              await AsyncStorage.setItem(timerKey, JSON.stringify({
+                remainingSeconds: allowedTime,
+                lastTickAt: new Date(now).toISOString(),
+                startedAt: startedAt
+              }));
+              setTimeElapsed(0);
+              return { remaining: allowedTime, startedAt };
+            }
+            
+            setTimeElapsed(allowedTime - remaining);
+            return { remaining, startedAt: parsed.startedAt || new Date(now).toISOString() };
+          } else {
+            console.log('⏰ [TIMER] No cached state - initializing new timer');
+            // Initialize new timer
+            const startedAt = new Date(now).toISOString();
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: allowedTime,
+              lastTickAt: new Date(now).toISOString(),
+              startedAt: startedAt
+            }));
+            return { remaining: allowedTime, startedAt };
+          }
+        } catch (e) {
+          console.error('Timer cache init error:', e);
+          const startedAt = new Date().toISOString();
+          return { remaining: allowedTime, startedAt };
+        }
+      };
+
+      // Initialize timer state BEFORE starting interval
+      loadTimerState().then(({ remaining, startedAt }) => {
+        console.log('⏰ [TIMER] Timer state loaded, starting interval', { remaining, startedAt });
+        remainingTimeRef.current = remaining;
+        timerStartedAtRef.current = startedAt;
+        setTimeElapsed(allowedTime - remaining);
+        
+        // Only start interval after timer state is loaded
+        console.log('⏰ [TIMER] Creating interval...', { remaining, hasPerformSubmit: !!performSubmitRef.current });
+        
+        // If timer already expired, submit immediately
+        if (remaining <= 0) {
+          console.log('⏰ [TIMER] Timer already expired - submitting immediately');
+          timerInitializedRef.current = false;
+          performSubmitRef.current?.();
+          return;
+        }
+        
+        countdownTimerRef.current = setInterval(async () => {
+          console.log('⏰ [TIMER] Tick', { remaining: remainingTimeRef.current });
+          remainingTimeRef.current -= 1;
+          setTimeElapsed(allowedTime - remainingTimeRef.current);
+          
+          // Save timer state (preserve startedAt from initialization)
+          try {
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: remainingTimeRef.current,
+              lastTickAt: new Date().toISOString(),
+              startedAt: timerStartedAtRef.current // Preserve original start time
+            }));
+          } catch (e) {
+            console.error('Timer save error:', e);
+          }
+          
+          // Auto-submit when time runs out - no popup, direct submission
+          if (remainingTimeRef.current <= 0) {
+            console.log('⏰ [TIMER] Time expired - submitting', { hasPerformSubmit: !!performSubmitRef.current });
+            if (countdownTimerRef.current) {
+              clearInterval(countdownTimerRef.current);
+              countdownTimerRef.current = null;
+            }
+            timerInitializedRef.current = false; // Reset for retake
+            // Directly submit without any confirmation
+            if (performSubmitRef.current) {
+              console.log('⏰ [TIMER] Calling performSubmit...');
+              performSubmitRef.current();
+            } else {
+              console.error('⏰ [TIMER] performSubmitRef.current is null!');
+            }
+          }
+        }, 1000);
+      });
+
+      return () => {
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+        // Reset timerInitializedRef when testId or studentId changes (new test)
+        timerInitializedRef.current = false;
+      };
+    }
+    // If no timer, don't start anything
+  }, [testData, blocks.length, studentId, testId]);
 
   useEffect(() => {
     loadTestData();
@@ -835,18 +1133,32 @@ export default function MatchingTestScreen() {
     if (!coord || !nat || !ren || nat.width === 0 || nat.height === 0) {
       return { left: 0, top: 0, width: 0, height: 0 };
     }
-    // Backup logic: scale natural-space rect directly into render-space, no centering offsets
+    
+    // Calculate uniform scale to maintain aspect ratio (like web app)
+    const scaleX = ren.width / nat.width;
+    const scaleY = ren.height / nat.height;
+    const scale = Math.min(scaleX, scaleY, 1); // Don't scale up, maintain aspect ratio
+    
+    // Calculate scaled dimensions
+    const scaledWidth = nat.width * scale;
+    const scaledHeight = nat.height * scale;
+    
+    // Calculate centering offset (image is centered in container with 'contain' mode)
+    const offsetX = (ren.width - scaledWidth) / 2;
+    const offsetY = (ren.height - scaledHeight) / 2;
+    
+    // Parse coordinates from natural image space
     const natX = parseCoord(coord.x, nat.width);
     const natY = parseCoord(coord.y, nat.height);
     const natW = parseCoord(coord.width, nat.width);
     const natH = parseCoord(coord.height, nat.height);
-    const scaleX = ren.width / nat.width;
-    const scaleY = ren.height / nat.height;
+    
+    // Transform to render space: scale then offset (like web app)
     return {
-      left: natX * scaleX,
-      top: natY * scaleY,
-      width: natW * scaleX,
-      height: natH * scaleY,
+      left: offsetX + (natX * scale),
+      top: offsetY + (natY * scale),
+      width: natW * scale,
+      height: natH * scale,
     };
   };
 
@@ -858,55 +1170,89 @@ export default function MatchingTestScreen() {
   const getArrowPoints = (arrow: any) => {
     const ren = imageRenderSize;
     const nat = imageNaturalSize;
-    if (!ren) return null;
+    if (!ren || !nat || nat.width === 0 || nat.height === 0) return null;
 
     const color = arrow?.style?.color || '#dc3545';
     const thickness = arrow?.style?.thickness || 3;
 
+    // Calculate uniform scale to maintain aspect ratio (like web app)
+    const scaleX = ren.width / nat.width;
+    const scaleY = ren.height / nat.height;
+    const scale = Math.min(scaleX, scaleY, 1); // Don't scale up, maintain aspect ratio
+    
+    // Calculate scaled dimensions
+    const scaledWidth = nat.width * scale;
+    const scaledHeight = nat.height * scale;
+    
+    // Calculate centering offset (image is centered in container with 'contain' mode)
+    const offsetX = (ren.width - scaledWidth) / 2;
+    const offsetY = (ren.height - scaledHeight) / 2;
+
     let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
 
-    const hasRel = arrow?.rel_start_x != null && arrow?.rel_start_y != null && arrow?.rel_end_x != null && arrow?.rel_end_y != null;
-    const hasStartEndScalars = (arrow?.start_x != null && arrow?.start_y != null && arrow?.end_x != null && arrow?.end_y != null);
+    // Prefer relative coordinates when available (like web app)
+    const hasRel = arrow?.rel_start_x != null && arrow?.rel_start_y != null && 
+                   arrow?.rel_end_x != null && arrow?.rel_end_y != null &&
+                   arrow?.image_width && arrow?.image_height &&
+                   arrow.image_width > 0 && arrow.image_height > 0;
 
     if (hasRel) {
-      // Percent-based to render size (backup logic)
-      x1 = (toNum(arrow.rel_start_x) / 100) * ren.width;
-      y1 = (toNum(arrow.rel_start_y) / 100) * ren.height;
-      x2 = (toNum(arrow.rel_end_x) / 100) * ren.width;
-      y2 = (toNum(arrow.rel_end_y) / 100) * ren.height;
-    } else if (hasStartEndScalars) {
+      // Use relative coordinates with original image dimensions
+      const origW = Number(arrow.image_width) || nat.width;
+      const origH = Number(arrow.image_height) || nat.height;
+      const relScaleX = scaledWidth / origW;
+      const relScaleY = scaledHeight / origH;
+      x1 = offsetX + (Number(arrow.rel_start_x) / 100) * origW * relScaleX;
+      y1 = offsetY + (Number(arrow.rel_start_y) / 100) * origH * relScaleY;
+      x2 = offsetX + (Number(arrow.rel_end_x) / 100) * origW * relScaleX;
+      y2 = offsetY + (Number(arrow.rel_end_y) / 100) * origH * relScaleY;
+    } else if (arrow?.start_x != null && arrow?.start_y != null && arrow?.end_x != null && arrow?.end_y != null) {
+      // Fallback to absolute coordinates
       const sx = toNum(arrow.start_x);
       const sy = toNum(arrow.start_y);
       const ex = toNum(arrow.end_x);
       const ey = toNum(arrow.end_y);
-      if (nat?.width && nat?.height) {
-        const scaleX = ren.width / nat.width;
-        const scaleY = ren.height / nat.height;
-        const alreadyRenderSpace = sx <= ren.width + 1 && ex <= ren.width + 1 && sy <= ren.height + 1 && ey <= ren.height + 1;
-        if (alreadyRenderSpace) {
-          x1 = sx; y1 = sy; x2 = ex; y2 = ey;
-        } else {
-          x1 = sx * scaleX; y1 = sy * scaleY; x2 = ex * scaleX; y2 = ey * scaleY;
-        }
+      
+      // Check if coordinates are already in render space
+      const alreadyRenderSpace = sx <= ren.width + 1 && ex <= ren.width + 1 && 
+                                 sy <= ren.height + 1 && ey <= ren.height + 1;
+      
+      if (alreadyRenderSpace) {
+        // Coordinates are already in render space → just offset by image position
+        x1 = offsetX + sx;
+        y1 = offsetY + sy;
+        x2 = offsetX + ex;
+        y2 = offsetY + ey;
       } else {
-        x1 = sx; y1 = sy; x2 = ex; y2 = ey;
+        // Coordinates are in original image space → scale then offset
+        x1 = offsetX + (sx * scale);
+        y1 = offsetY + (sy * scale);
+        x2 = offsetX + (ex * scale);
+        y2 = offsetY + (ey * scale);
       }
     } else if (arrow?.start && arrow?.end) {
+      // Legacy format with start/end objects
       const sx = toNum(arrow.start.x);
       const sy = toNum(arrow.start.y);
       const ex = toNum(arrow.end.x);
       const ey = toNum(arrow.end.y);
-      if (nat?.width && nat?.height) {
-        const scaleX = ren.width / nat.width;
-        const scaleY = ren.height / nat.height;
-        const alreadyRenderSpace = sx <= ren.width + 1 && ex <= ren.width + 1 && sy <= ren.height + 1 && ey <= ren.height + 1;
-        if (alreadyRenderSpace) {
-          x1 = sx; y1 = sy; x2 = ex; y2 = ey;
-        } else {
-          x1 = sx * scaleX; y1 = sy * scaleY; x2 = ex * scaleX; y2 = ey * scaleY;
-        }
+      
+      // Check if coordinates are already in render space
+      const alreadyRenderSpace = sx <= ren.width + 1 && ex <= ren.width + 1 && 
+                                 sy <= ren.height + 1 && ey <= ren.height + 1;
+      
+      if (alreadyRenderSpace) {
+        // Coordinates are already in render space → just offset by image position
+        x1 = offsetX + sx;
+        y1 = offsetY + sy;
+        x2 = offsetX + ex;
+        y2 = offsetY + ey;
       } else {
-        x1 = sx; y1 = sy; x2 = ex; y2 = ey;
+        // Coordinates are in original image space → scale then offset
+        x1 = offsetX + (sx * scale);
+        y1 = offsetY + (sy * scale);
+        x2 = offsetX + (ex * scale);
+        y2 = offsetY + (ey * scale);
       }
     } else {
       return null;
@@ -939,7 +1285,7 @@ export default function MatchingTestScreen() {
           answeredCount={Object.keys(placedWords).length}
           totalQuestions={blocks.length}
           percentage={blocks.length > 0 ? Math.round((Object.keys(placedWords).length / blocks.length) * 100) : 0}
-          timeElapsed={0} // TODO: Add timer
+          timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
           onSubmitTest={submitTest}
           isSubmitting={isSubmitting}
           canSubmit={isAllPlaced}
@@ -1002,7 +1348,7 @@ export default function MatchingTestScreen() {
                   onReceiveDragDrop={({ dragged }) => {
                     const wid = String(dragged?.payload?.wordId ?? dragged?.payload);
                     if (DEBUG_MATCHING) console.log('Matching RN: drop on block', block.id, 'word', wid);
-                    setPlacedWords(prev => ({ ...prev, [String(block.id)]: wid }));
+                    handleWordPlacement(wid, block.id);
                   }}
                 >
                   <View
@@ -1104,12 +1450,26 @@ export default function MatchingTestScreen() {
                   const ey = Number(arrow?.end_y ?? arrow?.end?.y);
                   if (
                     imageNaturalSize &&
+                    imageRenderSize &&
                     [sx, sy, ex, ey].every(v => typeof v === 'number' && !isNaN(v))
                   ) {
-                    const x1 = (sx / imageNaturalSize.width) * imageRenderSize.width;
-                    const y1 = (sy / imageNaturalSize.height) * imageRenderSize.height;
-                    const x2 = (ex / imageNaturalSize.width) * imageRenderSize.width;
-                    const y2 = (ey / imageNaturalSize.height) * imageRenderSize.height;
+                    // Calculate uniform scale and offset (like web app)
+                    const scaleX = imageRenderSize.width / imageNaturalSize.width;
+                    const scaleY = imageRenderSize.height / imageNaturalSize.height;
+                    const scale = Math.min(scaleX, scaleY, 1);
+                    const scaledWidth = imageNaturalSize.width * scale;
+                    const scaledHeight = imageNaturalSize.height * scale;
+                    const offsetX = (imageRenderSize.width - scaledWidth) / 2;
+                    const offsetY = (imageRenderSize.height - scaledHeight) / 2;
+                    
+                    // Check if already in render space
+                    const alreadyRenderSpace = sx <= imageRenderSize.width + 1 && ex <= imageRenderSize.width + 1 && 
+                                             sy <= imageRenderSize.height + 1 && ey <= imageRenderSize.height + 1;
+                    
+                    const x1 = alreadyRenderSpace ? (offsetX + sx) : (offsetX + (sx * scale));
+                    const y1 = alreadyRenderSpace ? (offsetY + sy) : (offsetY + (sy * scale));
+                    const x2 = alreadyRenderSpace ? (offsetX + ex) : (offsetX + (ex * scale));
+                    const y2 = alreadyRenderSpace ? (offsetY + ey) : (offsetY + (ey * scale));
                     if (DEBUG_MATCHING && idx === 0) {
                       try { console.log('Matching RN: fallback points', { x1, y1, x2, y2 }); } catch {}
                     }

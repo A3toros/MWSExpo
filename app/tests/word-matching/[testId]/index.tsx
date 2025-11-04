@@ -38,6 +38,17 @@ export default function WordMatchingTestScreen() {
   const [isSubmittingToAPI, setIsSubmittingToAPI] = useState(false);
   const [leftOrder, setLeftOrder] = useState<number[] | null>(null);
   const [rightOrder, setRightOrder] = useState<number[] | null>(null);
+  const [timeElapsed, setTimeElapsed] = useState(0);
+  const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
+  const [caughtCheating, setCaughtCheating] = useState(false);
+  const [studentId, setStudentId] = useState<string | null>(null);
+  
+  // Timer refs to prevent re-initialization
+  const timerInitializedRef = useRef<boolean>(false);
+  const performSubmitRef = useRef<() => Promise<void>>();
+  const remainingTimeRef = useRef<number>(0);
+  const timerStartedAtRef = useRef<string>('');
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Decide correctness for a left->right selection.
   const isSelectionCorrect = useCallback((leftIndex: number, rightIndex: number | undefined | null) => {
@@ -97,12 +108,21 @@ export default function WordMatchingTestScreen() {
       
       if (!studentId) return false;
       
-      const completionKey = `test_completed_${studentId}_word_matching_${testId}`;
-      const isCompleted = await AsyncStorage.getItem(completionKey);
+      // Check for retest key first - if retest is available, allow access (web app pattern)
       const retestKey = `retest1_${studentId}_word_matching_${testId}`;
       const hasRetest = await AsyncStorage.getItem(retestKey);
       
-      if (isCompleted === 'true' && hasRetest !== 'true') {
+      // If retest is available, allow access even if test is completed
+      if (hasRetest === 'true') {
+        console.log('🎓 Retest available - allowing access even if test is completed');
+        return false; // Don't block retests
+      }
+      
+      // Only check completion if no retest is available
+      const completionKey = `test_completed_${studentId}_word_matching_${testId}`;
+      const isCompleted = await AsyncStorage.getItem(completionKey);
+      
+      if (isCompleted === 'true') {
         Alert.alert('Test Completed', 'This test has already been completed', [
           { text: 'OK', onPress: () => router.back() }
         ]);
@@ -319,7 +339,7 @@ export default function WordMatchingTestScreen() {
         score: correctMatches,
         maxScore: testData.leftWords?.length || 0,
         answers: answers,
-        time_taken: 0,
+        time_taken: timeElapsed,
         started_at: new Date().toISOString(),
         submitted_at: new Date().toISOString(),
         caught_cheating: false,
@@ -350,7 +370,194 @@ export default function WordMatchingTestScreen() {
       setIsSubmitting(false);
       setIsSubmittingToAPI(false);
     }
-  }, [user?.student_id, testId, testData, answers]);
+  }, [user?.student_id, testId, testData, answers, caughtCheating, visibilityChangeTimes, timeElapsed]);
+
+  // Store performSubmit in ref to avoid dependency issues
+  useEffect(() => {
+    performSubmitRef.current = performSubmit;
+  }, [performSubmit]);
+
+  // Extract student ID once on mount
+  useEffect(() => {
+    const extractStudentId = async () => {
+      let id: string | number | null = user?.student_id || null;
+      if (!id) {
+        try {
+          const token = await AsyncStorage.getItem('auth_token');
+          if (token) {
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(atob(parts[1]));
+              id = payload.student_id || payload.id || null;
+            }
+          }
+        } catch {}
+      }
+      if (!id) {
+        try {
+          const authUserStr = await AsyncStorage.getItem('auth_user');
+          const authUser = authUserStr ? JSON.parse(authUserStr) : null;
+          id = authUser?.student_id || authUser?.id || null;
+        } catch {}
+      }
+      setStudentId(id ? String(id) : null);
+    };
+    extractStudentId();
+  }, [user?.student_id]);
+
+  // Timer effect - only start if test has timer enabled
+  useEffect(() => {
+    console.log('⏰ [TIMER] Effect triggered', { 
+      hasTestData: !!testData, 
+      leftWordsLength: testData?.leftWords?.length, 
+      studentId: studentId,
+      testId 
+    });
+    
+    if (!testData || !testData.leftWords || !studentId) {
+      console.log('⏰ [TIMER] Skipping - missing requirements', { 
+        testData: !!testData, 
+        leftWords: testData?.leftWords?.length, 
+        studentId: !!studentId 
+      });
+      return;
+    }
+    
+    // Only start timer if test has a time limit set
+    const allowedTime = testData.allowed_time || testData.time_limit;
+    console.log('⏰ [TIMER] Checking timer', { 
+      allowedTime, 
+      allowed_time: testData.allowed_time,
+      time_limit: testData.time_limit,
+      testDataKeys: Object.keys(testData || {}),
+      timerInitialized: timerInitializedRef.current 
+    });
+    
+    if (allowedTime && allowedTime > 0) {
+      // Prevent multiple timer initializations
+      if (timerInitializedRef.current) {
+        console.log('⏰ [TIMER] Already initialized - skipping');
+        return;
+      }
+      
+      // CRITICAL: Set ref immediately before any async work to prevent race conditions
+      timerInitializedRef.current = true;
+      console.log('⏰ [TIMER] Starting timer initialization', { allowedTime });
+      
+      const timerKey = `test_timer_${studentId}_word_matching_${testId}`;
+      console.log('⏰ [TIMER] Timer key:', timerKey);
+      
+      // Load cached timer state
+      const loadTimerState = async () => {
+        console.log('⏰ [TIMER] Loading timer state...');
+        try {
+          const cached = await AsyncStorage.getItem(timerKey);
+          const now = Date.now();
+          if (cached) {
+            console.log('⏰ [TIMER] Found cached timer state');
+            const parsed = JSON.parse(cached);
+            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
+            const cachedRemaining = Number(parsed.remainingSeconds || allowedTime);
+            const remaining = Math.max(0, cachedRemaining - Math.max(0, drift));
+            console.log('⏰ [TIMER] Cached state loaded', { remaining, drift, cachedRemaining });
+            
+            // If timer expired (remaining <= 0), start fresh timer instead
+            if (remaining <= 0) {
+              console.log('⏰ [TIMER] Cached timer expired - starting fresh timer');
+              // Clear expired cache and start new timer
+              const startedAt = new Date(now).toISOString();
+              await AsyncStorage.setItem(timerKey, JSON.stringify({
+                remainingSeconds: allowedTime,
+                lastTickAt: new Date(now).toISOString(),
+                startedAt: startedAt
+              }));
+              setTimeElapsed(0);
+              return { remaining: allowedTime, startedAt };
+            }
+            
+            setTimeElapsed(allowedTime - remaining);
+            return { remaining, startedAt: parsed.startedAt || new Date(now).toISOString() };
+          } else {
+            console.log('⏰ [TIMER] No cached state - initializing new timer');
+            // Initialize new timer
+            const startedAt = new Date(now).toISOString();
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: allowedTime,
+              lastTickAt: new Date(now).toISOString(),
+              startedAt: startedAt
+            }));
+            return { remaining: allowedTime, startedAt };
+          }
+        } catch (e) {
+          console.error('Timer cache init error:', e);
+          const startedAt = new Date().toISOString();
+          return { remaining: allowedTime, startedAt };
+        }
+      };
+
+      // Initialize timer state BEFORE starting interval
+      loadTimerState().then(({ remaining, startedAt }) => {
+        console.log('⏰ [TIMER] Timer state loaded, starting interval', { remaining, startedAt });
+        remainingTimeRef.current = remaining;
+        timerStartedAtRef.current = startedAt;
+        setTimeElapsed(allowedTime - remaining);
+        
+        // Only start interval after timer state is loaded
+        // If timer already expired, submit immediately
+        if (remaining <= 0) {
+          console.log('⏰ [TIMER] Timer already expired - submitting immediately');
+          timerInitializedRef.current = false;
+          performSubmitRef.current?.();
+          return;
+        }
+        
+        console.log('⏰ [TIMER] Creating interval...', { remaining, hasPerformSubmit: !!performSubmitRef.current });
+        countdownTimerRef.current = setInterval(async () => {
+          console.log('⏰ [TIMER] Tick', { remaining: remainingTimeRef.current });
+          remainingTimeRef.current -= 1;
+          setTimeElapsed(allowedTime - remainingTimeRef.current);
+          
+          // Save timer state (preserve startedAt from initialization)
+          try {
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: remainingTimeRef.current,
+              lastTickAt: new Date().toISOString(),
+              startedAt: timerStartedAtRef.current // Preserve original start time
+            }));
+          } catch (e) {
+            console.error('Timer save error:', e);
+          }
+          
+          // Auto-submit when time runs out - no popup, direct submission
+          if (remainingTimeRef.current <= 0) {
+            console.log('⏰ [TIMER] Time expired - submitting', { hasPerformSubmit: !!performSubmitRef.current });
+            if (countdownTimerRef.current) {
+              clearInterval(countdownTimerRef.current);
+              countdownTimerRef.current = null;
+            }
+            timerInitializedRef.current = false; // Reset for retake
+            // Directly submit without any confirmation
+            if (performSubmitRef.current) {
+              console.log('⏰ [TIMER] Calling performSubmit...');
+              performSubmitRef.current();
+            } else {
+              console.error('⏰ [TIMER] performSubmitRef.current is null!');
+            }
+          }
+        }, 1000);
+      });
+
+      return () => {
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+        // Reset timerInitializedRef when testId or studentId changes (new test)
+        timerInitializedRef.current = false;
+      };
+    }
+    // If no timer, don't start anything
+  }, [testData, studentId, testId]);
 
   // Reset function
   const handleReset = useCallback(() => {
@@ -690,7 +897,7 @@ export default function WordMatchingTestScreen() {
             if (typeof answer === 'object') return Object.keys(answer).length > 0;
             return true;
           }).length / (testData.leftWords?.length || 0)) * 100) : 0}
-          timeElapsed={0} // TODO: Add timer
+          timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
           onSubmitTest={submitTest}
           isSubmitting={isSubmitting}
           canSubmit={isAllAnswered}

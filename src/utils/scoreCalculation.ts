@@ -142,11 +142,58 @@ export class ScoreCalculator {
       
       case 'input':
         if (Array.isArray(correctAnswer)) {
-          return correctAnswer.some(answer => 
-            this.normalizeAnswer(answer) === this.normalizeAnswer(studentAnswer)
-          );
+          return correctAnswer.some(answer => {
+            const normalizedCorrect = this.normalizeAnswer(answer);
+            const normalizedStudent = this.normalizeAnswer(studentAnswer);
+            
+            // First check for exact match (backward compatibility)
+            if (normalizedStudent === normalizedCorrect) {
+              return true;
+            }
+            
+            // Then check if trimmed correct answer is present in trimmed student answer
+            // This accepts answers with extra letters/numbers (e.g., "Paris123" contains "Paris")
+            if (normalizedCorrect && normalizedStudent.includes(normalizedCorrect)) {
+              // For single character answers, only match if at start/end (to avoid false positives like "a" in "cat")
+              // For multi-character answers, accept any substring match
+              if (normalizedCorrect.length === 1) {
+                // Single character: must be at start or end of answer
+                return normalizedStudent.startsWith(normalizedCorrect) || 
+                       normalizedStudent.endsWith(normalizedCorrect);
+              } else {
+                // Multi-character: accept substring match
+                return true;
+              }
+            }
+            
+            return false;
+          });
+        } else {
+          const normalizedCorrect = this.normalizeAnswer(correctAnswer);
+          const normalizedStudent = this.normalizeAnswer(studentAnswer);
+          
+          // First check for exact match (backward compatibility)
+          if (normalizedStudent === normalizedCorrect) {
+            return true;
+          }
+          
+          // Then check if trimmed correct answer is present in trimmed student answer
+          // This accepts answers with extra letters/numbers (e.g., "Paris123" contains "Paris")
+          if (normalizedCorrect && normalizedStudent.includes(normalizedCorrect)) {
+            // For single character answers, only match if at start/end (to avoid false positives like "a" in "cat")
+            // For multi-character answers, accept any substring match
+            if (normalizedCorrect.length === 1) {
+              // Single character: must be at start or end of answer
+              return normalizedStudent.startsWith(normalizedCorrect) || 
+                     normalizedStudent.endsWith(normalizedCorrect);
+            } else {
+              // Multi-character: accept substring match
+              return true;
+            }
+          }
+          
+          return false;
         }
-        return this.normalizeAnswer(correctAnswer) === this.normalizeAnswer(studentAnswer);
       
       case 'fill_blanks':
         if (Array.isArray(correctAnswer) && Array.isArray(studentAnswer)) {

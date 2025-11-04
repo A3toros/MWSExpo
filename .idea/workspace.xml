@@ -9,29 +9,15 @@
       <change beforePath="$PROJECT_DIR$/../../Backup/mathayomwatsing" beforeDir="false" afterPath="$PROJECT_DIR$/../../Backup/mathayomwatsing" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../../game" beforeDir="false" afterPath="$PROJECT_DIR$/../../game" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.." beforeDir="false" afterPath="$PROJECT_DIR$/.." afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/android/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/app/build.gradle" beforeDir="false" afterPath="$PROJECT_DIR$/android/app/build.gradle" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/app/src/main/AndroidManifest.xml" beforeDir="false" afterPath="$PROJECT_DIR$/android/app/src/main/AndroidManifest.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/app/src/main/java/com/mathayomwatsing/student/MainActivity.kt" beforeDir="false" afterPath="$PROJECT_DIR$/android/app/src/main/java/com/mathayomwatsing/student/MainActivity.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/app/src/main/java/com/mathayomwatsing/student/MainApplication.kt" beforeDir="false" afterPath="$PROJECT_DIR$/android/app/src/main/java/com/mathayomwatsing/student/MainApplication.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/app/src/main/res/drawable/rn_edit_text_material.xml" beforeDir="false" afterPath="$PROJECT_DIR$/android/app/src/main/res/drawable/rn_edit_text_material.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/app/src/main/res/values/strings.xml" beforeDir="false" afterPath="$PROJECT_DIR$/android/app/src/main/res/values/strings.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/app/src/main/res/values/styles.xml" beforeDir="false" afterPath="$PROJECT_DIR$/android/app/src/main/res/values/styles.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/build.gradle" beforeDir="false" afterPath="$PROJECT_DIR$/android/build.gradle" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/gradle.properties" beforeDir="false" afterPath="$PROJECT_DIR$/android/gradle.properties" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/gradle/wrapper/gradle-wrapper.properties" beforeDir="false" afterPath="$PROJECT_DIR$/android/gradle/wrapper/gradle-wrapper.properties" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/gradlew" beforeDir="false" afterPath="$PROJECT_DIR$/android/gradlew" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/react-settings-plugin/build.gradle.kts" beforeDir="false" afterPath="$PROJECT_DIR$/android/react-settings-plugin/build.gradle.kts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/react-settings-plugin/src/main/kotlin/expo/plugins/ReactSettingsPlugin.kt" beforeDir="false" afterPath="$PROJECT_DIR$/android/react-settings-plugin/src/main/kotlin/expo/plugins/ReactSettingsPlugin.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/settings.gradle" beforeDir="false" afterPath="$PROJECT_DIR$/android/settings.gradle" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.json" beforeDir="false" afterPath="$PROJECT_DIR$/app.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/_layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/_layout.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/assets/cyberpunk-css-main/cyberpunk.css" beforeDir="false" afterPath="$PROJECT_DIR$/assets/cyberpunk-css-main/cyberpunk.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/components/dashboard/DashboardView.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/dashboard/DashboardView.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/components/dashboard/SubjectPerformanceCard.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/dashboard/SubjectPerformanceCard.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/components/menu/MenuHeader.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/menu/MenuHeader.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/components/menu/MenuItem.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/menu/MenuItem.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/types/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/types/index.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/vendor/CyberpunkButtonFullWidth.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/vendor/CyberpunkButtonFullWidth.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/tests/fill-blanks/[testId]/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/tests/fill-blanks/[testId]/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/tests/input/[testId]/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/tests/input/[testId]/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/tests/multiple-choice/[testId]/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/tests/multiple-choice/[testId]/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/tests/true-false/[testId]/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/tests/true-false/[testId]/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/questions/fill-blanks/FillBlanksTestRenderer.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/questions/fill-blanks/FillBlanksTestRenderer.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/scoreCalculation.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/scoreCalculation.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/themeUtils.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/themeUtils.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

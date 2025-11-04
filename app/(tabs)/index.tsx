@@ -67,6 +67,7 @@ export default function DashboardScreen() {
   const [completedTests, setCompletedTests] = useState<Set<string>>(new Set());
   const [isCompletionStatusLoaded, setIsCompletionStatusLoaded] = useState(false);
   const [currentView, setCurrentView] = useState<'dashboard' | 'active' | 'results' | 'profile' | 'settings'>('active');
+  const [studentId, setStudentId] = useState<string>('');
 
   // Reanimated 3 values
   const menuTranslateX = useSharedValue(-Dimensions.get('window').width * 0.6);
@@ -130,6 +131,9 @@ export default function DashboardScreen() {
       }
       
       console.log('Dashboard: Final studentId:', studentId);
+      
+      // Store studentId in state for use in components
+      setStudentId(studentId);
       
       // Set user data - use the best available user data
       let finalUserData = null;
@@ -256,14 +260,34 @@ export default function DashboardScreen() {
         }
         
         // Update completed tests from API results (web app pattern)
+        // BUT: Don't mark tests as completed if they have retest available with attempts left
         if (resultsData && resultsData.length > 0) {
           const newCompleted = new Set<string>();
           resultsData.forEach(result => {
             const key = `${result.test_type}_${result.test_id}`;
-            newCompleted.add(key);
-            // Also mark in AsyncStorage (with student ID)
-            const completionKey = `test_completed_${studentId}_${result.test_type}_${result.test_id}`;
-            AsyncStorage.setItem(completionKey, 'true');
+            
+            // Check if this test has retest available with attempts left
+            const testWithRetest = testsData.find(t => 
+              t.test_type === result.test_type && 
+              t.test_id === result.test_id
+            );
+            
+            const hasRetestWithAttempts = 
+              testWithRetest?.retest_available && 
+              testWithRetest?.retest_attempts_left !== undefined &&
+              testWithRetest?.retest_attempts_left !== null &&
+              testWithRetest?.retest_attempts_left > 0;
+            
+            // Only mark as completed if no retest available or no attempts left
+            if (!hasRetestWithAttempts) {
+              newCompleted.add(key);
+              // Also mark in AsyncStorage (with student ID)
+              const completionKey = `test_completed_${studentId}_${result.test_type}_${result.test_id}`;
+              AsyncStorage.setItem(completionKey, 'true');
+              console.log('🎓 Marked test as completed (no retest available):', key);
+            } else {
+              console.log('🎓 Skipping completion for test with retest available:', key, 'attempts left:', testWithRetest?.retest_attempts_left);
+            }
           });
           
           // Merge with existing completed tests instead of overwriting
@@ -663,6 +687,7 @@ export default function DashboardScreen() {
               isCompletionStatusLoaded={isCompletionStatusLoaded}
               showAllTests={showAllTests}
               onToggleShowAll={() => setShowAllTests(!showAllTests)}
+              studentId={studentId}
             />
           )}
 

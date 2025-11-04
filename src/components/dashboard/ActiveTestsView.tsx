@@ -6,6 +6,8 @@ import { router } from 'expo-router';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses, getCyberpunkClasses } from '../../utils/themeUtils';
 import { useCyberpunkPulse, useCyberpunkGlow } from '../../utils/cyberpunkAnimations';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { startRetest } from '../../utils/retestUtils';
 
 type ActiveTest = {
   test_id: number;
@@ -17,6 +19,7 @@ type ActiveTest = {
   deadline?: number | null;
   retest_available?: boolean;
   retest_attempts_left?: number | null;
+  retest_assignment_id?: number;
 };
 
 type Props = {
@@ -26,6 +29,7 @@ type Props = {
   isCompletionStatusLoaded: boolean;
   showAllTests: boolean;
   onToggleShowAll: () => void;
+  studentId?: string | null;
 };
 
 export function ActiveTestsView({ 
@@ -34,7 +38,8 @@ export function ActiveTestsView({
   completedTests, 
   isCompletionStatusLoaded, 
   showAllTests, 
-  onToggleShowAll 
+  onToggleShowAll,
+  studentId 
 }: Props) {
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);
@@ -121,35 +126,46 @@ export function ActiveTestsView({
                   );
                 }
                 
-                // If test is completed with retest available:
-                // Always show "Completed" regardless of attempts_left (test was just submitted)
-                // This handles the case where test was just submitted and API hasn't updated yet
-                if (isCompleted && test?.retest_available) {
-                  return (
-                    <ThemedButton
-                      title={themeMode === 'cyberpunk' ? '✓ COMPLETED' : '✓ Completed'}
-                      disabled
-                      size="sm"
-                      variant="modal"
-                    />
-                  );
-                }
-                
-                // If retest is available and NOT completed yet, check attempts
-                if (!isCompleted && test?.retest_available) {
+                // If retest is available, check attempts regardless of completion status
+                // (completion status might be stale if test was just submitted)
+                if (test?.retest_available) {
+                  // Match logic from processRetestAvailability: undefined/null means available
                   const hasRetestAttempts = 
-                    test?.retest_attempts_left !== undefined &&
-                    test?.retest_attempts_left !== null &&
+                    test?.retest_attempts_left === undefined ||
+                    test?.retest_attempts_left === null ||
                     test?.retest_attempts_left > 0;
                   
+                  console.log('🎓 Retest check:', {
+                    testKey: testKey,
+                    retest_available: test?.retest_available,
+                    retest_attempts_left: test?.retest_attempts_left,
+                    hasRetestAttempts,
+                    isCompleted
+                  });
+                  
                   if (hasRetestAttempts) {
-                    // Show "Start Retest" button if attempts are available and test is not completed
+                    // Show "Start Retest" button if attempts are available
+                    // (even if test is marked as completed, since completion might be stale)
                     return (
                       <ThemedButton
                         title={themeMode === 'cyberpunk' ? 'START RETEST' : 'Start Retest'}
                         size="sm"
                         variant="modal"
-                        onPress={() => {
+                        onPress={async () => {
+                          // Start retest - set retest key and clear completion key BEFORE navigation (web app pattern)
+                          if (studentId) {
+                            try {
+                              await startRetest(studentId, {
+                                test_id: test.test_id,
+                                test_type: test.test_type,
+                                retest_available: test.retest_available,
+                                retest_assignment_id: test.retest_assignment_id
+                              });
+                            } catch (e) {
+                              console.error('Error starting retest:', e);
+                            }
+                          }
+                          
                           // Copy web app navigation logic exactly
                           if (test.test_type === 'matching_type') {
                             router.push(`/tests/matching/${test.test_id}`);

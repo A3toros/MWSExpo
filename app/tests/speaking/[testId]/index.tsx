@@ -126,20 +126,33 @@ export default function SpeakingTestScreen() {
         return false; // Can't check completion without student ID
       }
       
-      const completionKey = `test_completed_${sid}_speaking_${testId}`;
-      const isCompleted = await AsyncStorage.getItem(completionKey);
+      // Check for retest key first - if retest is available, allow access (web app pattern)
       const retestKey = `retest1_${sid}_speaking_${testId}`;
       const hasRetest = await AsyncStorage.getItem(retestKey);
       
       console.log('🎓 Speaking RN completion check:', {
         studentId: sid,
-        completionKey,
-        isCompleted,
         retestKey,
         hasRetest
       });
       
-      if (isCompleted === 'true' && hasRetest !== 'true') {
+      // If retest is available, allow access even if test is completed
+      if (hasRetest === 'true') {
+        console.log('🎓 Retest available - allowing access even if test is completed');
+        return false; // Don't block retests
+      }
+      
+      // Only check completion if no retest is available
+      const completionKey = `test_completed_${sid}_speaking_${testId}`;
+      const isCompleted = await AsyncStorage.getItem(completionKey);
+      
+      console.log('🎓 Speaking RN completion check (no retest):', {
+        studentId: sid,
+        completionKey,
+        isCompleted
+      });
+      
+      if (isCompleted === 'true') {
         Alert.alert('Test Completed', 'This test has already been completed', [
           { text: 'OK', onPress: () => router.back() }
         ]);
