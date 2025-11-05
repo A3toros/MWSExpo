@@ -72,8 +72,7 @@
             "targetSdkVersion": 34
           }
         }
-      ],
-      "expo-secure-store"
+      ]
     ],
     "experiments": {
       "typedRoutes": true

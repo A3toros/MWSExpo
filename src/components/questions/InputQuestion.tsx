@@ -4,6 +4,7 @@ import { View, Text, TextInput, ActivityIndicator, StyleSheet } from 'react-nati
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses } from '../../utils/themeUtils';
+import { renderMathInText, renderMathExpression } from '../../utils/mathRenderer';
 
 type Props = {
   question: {
@@ -154,6 +155,18 @@ export default function InputQuestion({
     }`}>
       {/* no header or status in answer input container */}
       
+      <Text className={`text-lg mb-4 ${
+        themeMode === 'cyberpunk' 
+          ? 'text-cyan-400 tracking-wider' 
+          : themeMode === 'dark' 
+          ? 'text-white' 
+          : 'text-gray-900'
+      }`}>
+        {renderMathInText(formatQuestion(questionText)).map((part, idx) => 
+          typeof part === 'string' ? <Text key={idx}>{part}</Text> : <React.Fragment key={idx}>{part}</React.Fragment>
+        )}
+      </Text>
+      
       <TextInput
         ref={inputRef}
         className={`border rounded-lg p-3 text-base min-h-12 ${
@@ -197,17 +210,29 @@ export default function InputQuestion({
           }`}>
             {themeMode === 'cyberpunk' ? 'CORRECT ANSWERS:' : 'Correct Answers:'}
           </Text>
-          {question.correct_answers.map((correctAnswer, index) => (
-            <Text key={index} className={`text-sm mb-1 ${
-              themeMode === 'cyberpunk' 
-                ? 'text-green-400 tracking-wider' 
-                : themeMode === 'dark' 
-                ? 'text-green-300' 
-                : 'text-green-700'
-            }`}>
-              • {correctAnswer}
-            </Text>
-          ))}
+          {question.correct_answers.map((correctAnswer, index) => {
+            const answerStr = String(correctAnswer);
+            const hasMath = answerStr.includes('$');
+            const hasLatex = /\\[a-zA-Z]+|[\^_]\{|\\times|\\div|\\sqrt|\\frac/.test(answerStr);
+            
+            return (
+              <Text key={index} className={`text-sm mb-1 ${
+                themeMode === 'cyberpunk' 
+                  ? 'text-green-400 tracking-wider' 
+                  : themeMode === 'dark' 
+                  ? 'text-green-300' 
+                  : 'text-green-700'
+              }`}>
+                • {hasMath || hasLatex ? (
+                  renderMathInText(answerStr).map((part, idx) => 
+                    typeof part === 'string' ? <Text key={idx}>{part}</Text> : <React.Fragment key={idx}>{part}</React.Fragment>
+                  )
+                ) : (
+                  answerStr
+                )}
+              </Text>
+            );
+          })}
         </View>
       )}
       

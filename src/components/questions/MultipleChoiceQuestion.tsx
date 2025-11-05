@@ -4,6 +4,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'rea
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses } from '../../utils/themeUtils';
+import { renderMathInText } from '../../utils/mathRenderer';
 
 type Props = {
   question: {
@@ -173,7 +174,9 @@ export default function MultipleChoiceQuestion({
           ? 'text-white' 
           : 'text-gray-900'
       }`}>
-        {formatQuestionText(questionText)}
+        {renderMathInText(formatQuestionText(questionText)).map((part, idx) => 
+          typeof part === 'string' ? <Text key={idx}>{part}</Text> : <React.Fragment key={idx}>{part}</React.Fragment>
+        )}
       </Text>
       
       <View style={styles.optionsContainer}>
@@ -239,7 +242,9 @@ export default function MultipleChoiceQuestion({
                     ? 'text-white' 
                     : 'text-gray-700'
                 }`}>
-                  {option || `Option ${optionLetter}`}
+                  {renderMathInText(option || `Option ${optionLetter}`).map((part, idx) => 
+                    typeof part === 'string' ? <Text key={idx}>{part}</Text> : <React.Fragment key={idx}>{part}</React.Fragment>
+                  )}
                 </Text>
               </View>
             </TouchableOpacity>
