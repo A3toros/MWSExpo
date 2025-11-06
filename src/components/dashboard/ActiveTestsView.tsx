@@ -18,6 +18,10 @@ type ActiveTest = {
   assigned_at?: number;
   deadline?: number | null;
   retest_available?: boolean;
+  retest_is_completed?: boolean;
+  retest_passed?: boolean;
+  retest_attempt_number?: number;
+  retest_max_attempts?: number | null;
   retest_attempts_left?: number | null;
   retest_assignment_id?: number;
 };
@@ -111,33 +115,9 @@ export function ActiveTestsView({
         ) : (
           (showAllTests ? tests : tests.slice(0, 3))
             .filter(test => {
-              // Filter out completed retests where attempts are exhausted
-              const testKey = `${test.test_type}_${test.test_id}`;
-              const isCompleted = completedTests.has(testKey);
-              
-              if (isCompleted && test?.retest_available) {
-                // Check retest_attempts metadata from AsyncStorage
-                const attemptsMetaKey = `retest_attempts_${studentId}_${test.test_type}_${test.test_id}`;
-                const attemptsMeta = retestAttempts[attemptsMetaKey];
-                
-                if (attemptsMeta) {
-                  // Metadata exists - use it to determine if attempts are exhausted
-                  const attemptsLeft = attemptsMeta.max - attemptsMeta.used;
-                  if (attemptsLeft <= 0) {
-                    // Filter out completed retests where attempts are exhausted
-                    console.log('🎓 Filtering out completed retest (attempts exhausted from metadata):', testKey);
-                    return false;
-                  }
-                } else {
-                  // No metadata - if test is completed, it's likely a completed retest
-                  // Filter it out to match web app behavior (completed retests are filtered out)
-                  // Only show if API explicitly says attempts left > 0 AND we're sure it's not a completed retest
-                  // Since we don't have metadata, if it's completed, filter it out
-                  console.log('🎓 Filtering out completed retest (no metadata, assuming completed):', testKey);
-                  return false;
-                }
-              }
-              
+              // ⚠️ REMOVED: Filtering is now handled by student_active_tests_view at SQL level
+              // View already excludes completed retests, so we don't need to filter here
+              // Just return all tests from API
               return true;
             })
             .map((test, index) => (
@@ -180,6 +160,18 @@ export function ActiveTestsView({
                   );
                 }
                 
+                // Check retest completion from API
+                if (test?.retest_is_completed) {
+                  return (
+                    <ThemedButton
+                      title={themeMode === 'cyberpunk' ? '✓ COMPLETED' : '✓ Completed'}
+                      disabled
+                      size="sm"
+                      variant="modal"
+                    />
+                  );
+                }
+
                 // Show completed status for regular tests (no retest available)
                 if (isCompleted && !test?.retest_available) {
                   return (
@@ -192,71 +184,10 @@ export function ActiveTestsView({
                   );
                 }
                 
-                // If retest is available, check attempts regardless of completion status
-                // (completion status might be stale if test was just submitted)
-                if (test?.retest_available) {
-                  // Check retest_attempts metadata from AsyncStorage (same as web app)
-                  const attemptsMetaKey = `retest_attempts_${studentId}_${test.test_type}_${test.test_id}`;
-                  const attemptsMeta = retestAttempts[attemptsMetaKey];
-                  
-                  // If metadata exists, use it to determine if attempts are exhausted
-                  let hasRetestAttempts = true;
-                  if (attemptsMeta) {
-                    const attemptsLeft = attemptsMeta.max - attemptsMeta.used;
-                    hasRetestAttempts = attemptsLeft > 0;
-                    console.log('🎓 Retest attempts from metadata:', {
-                      attemptsMetaKey,
-                      used: attemptsMeta.used,
-                      max: attemptsMeta.max,
-                      attemptsLeft,
-                      hasRetestAttempts
-                    });
-                  } else {
-                    // Fallback to API data if metadata not available
-                    // But if test is completed, we should check if it's a completed retest
-                    // If completed AND retest_available, and API shows attempts left,
-                    // it might be a race condition - check if test was just completed
-                    if (isCompleted) {
-                      // Test is completed - if it's a retest, it means attempts are likely exhausted
-                      // OR student passed. Either way, show completed.
-                      // Only show "Start Retest" if API explicitly says attempts left > 0
-                      // AND we're sure it's not a completed retest
-                      hasRetestAttempts = 
-                        test?.retest_attempts_left !== undefined &&
-                        test?.retest_attempts_left !== null &&
-                        test?.retest_attempts_left > 0;
-                    } else {
-                      // Test not completed - use API data normally
-                      hasRetestAttempts = 
-                        test?.retest_attempts_left === undefined ||
-                        test?.retest_attempts_left === null ||
-                        test?.retest_attempts_left > 0;
-                    }
-                  }
-                  
-                  console.log('🎓 Retest check:', {
-                    testKey: testKey,
-                    retest_available: test?.retest_available,
-                    retest_attempts_left: test?.retest_attempts_left,
-                    attemptsMeta,
-                    hasRetestAttempts,
-                    isCompleted
-                  });
-                  
-                  // If attempts exhausted OR completed, show completed button
-                  // (If completed and no metadata, assume it's a completed retest)
-                  if (!hasRetestAttempts || (isCompleted && !attemptsMeta)) {
-                    return (
-                      <ThemedButton
-                        title={themeMode === 'cyberpunk' ? '✓ COMPLETED' : '✓ Completed'}
-                        disabled
-                        size="sm"
-                        variant="modal"
-                      />
-                    );
-                  }
-                  
-                  if (hasRetestAttempts) {
+                // If retest is available and not completed (from API), show Start Retest button
+                if (test?.retest_available && !test?.retest_is_completed) {
+                  const attemptsLeft = test.retest_attempts_left || 0;
+                  if (attemptsLeft > 0) {
                     // Show "Start Retest" button if attempts are available
                     // (even if test is marked as completed, since completion might be stale)
                     return (

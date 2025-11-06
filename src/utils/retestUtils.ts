@@ -29,71 +29,34 @@ export async function processRetestAvailability(
     test_id: number;
     test_type: string;
     retest_available?: boolean;
+    retest_is_completed?: boolean;
     retest_attempts_left?: number | null;
     retest_assignment_id?: number;
   },
   studentId: string,
   onCompletedTestsUpdate?: (testKey: string, remove: boolean) => void
 ): Promise<void> {
-  if (!test.retest_available) {
+  // Only process if retest available and not completed (from API)
+  if (!test.retest_available || test.retest_is_completed) {
     return;
   }
 
   const retestKey = `retest1_${studentId}_${test.test_type}_${test.test_id}`;
-  const completionKey = `test_completed_${studentId}_${test.test_type}_${test.test_id}`;
 
-  // Check current state in AsyncStorage
-  const currentRetestKey = await AsyncStorage.getItem(retestKey);
-  const currentCompletionKey = await AsyncStorage.getItem(completionKey);
+  // Only set retest key, never delete completion key
+  // API handles filtering - completion keys are kept temporarily until API refresh
+  await AsyncStorage.setItem(retestKey, 'true');
+  console.log('🎓 Set retest key (API-driven):', retestKey, 'attempts left:', test.retest_attempts_left);
 
-  // If completion key exists but retest key doesn't, test was just submitted - don't process retest yet
-  // This prevents race condition where dashboard reloads before backend updates attempt_count
-  if (currentCompletionKey === 'true' && currentRetestKey !== 'true') {
-    console.log('🎓 Test was just submitted - skipping retest key setup to prevent race condition:', completionKey);
-    return;
+  // Store retest_assignment_id for submission
+  if (test.retest_assignment_id) {
+    const retestAssignKey = `retest_assignment_id_${studentId}_${test.test_type}_${test.test_id}`;
+    await AsyncStorage.setItem(retestAssignKey, test.retest_assignment_id.toString());
+    console.log('🎓 Stored retest_assignment_id:', retestAssignKey, test.retest_assignment_id);
   }
 
-  // Only set retest key if there are attempts left (web app pattern)
-  // retest_attempts_left > 0 means user can still retake
-  // If retest_attempts_left is undefined/null, assume it's available (for backwards compatibility)
-  const hasAttemptsLeft =
-    test.retest_attempts_left === undefined ||
-    test.retest_attempts_left === null ||
-    test.retest_attempts_left > 0;
-
-  if (hasAttemptsLeft) {
-    await AsyncStorage.setItem(retestKey, 'true');
-    console.log('🎓 Set retest key (web app pattern):', retestKey, 'attempts left:', test.retest_attempts_left);
-
-    // Store retest_assignment_id for submission (web app pattern)
-    if (test.retest_assignment_id) {
-      const retestAssignKey = `retest_assignment_id_${studentId}_${test.test_type}_${test.test_id}`;
-      await AsyncStorage.setItem(retestAssignKey, test.retest_assignment_id.toString());
-      console.log('🎓 Stored retest_assignment_id:', retestAssignKey, test.retest_assignment_id);
-    }
-
-    // Clear completion key so test doesn't show as completed (web app pattern)
-    await AsyncStorage.removeItem(completionKey);
-    console.log('🎓 Cleared completion key for retest:', completionKey);
-
-    // Also remove from completedTests set if callback provided
-    if (onCompletedTestsUpdate) {
-      const testKey = `${test.test_type}_${test.test_id}`;
-      onCompletedTestsUpdate(testKey, true);
-    }
-  } else {
-    // No attempts left - ensure retest key is removed
-    await AsyncStorage.removeItem(retestKey);
-    // Also remove retest_assignment_id
-    if (test.retest_assignment_id) {
-      const retestAssignKey = `retest_assignment_id_${studentId}_${test.test_type}_${test.test_id}`;
-      await AsyncStorage.removeItem(retestAssignKey);
-    }
-    // Ensure completion key is set when no attempts left (like web app)
-    // This ensures completed retests show "Completed" instead of "Start Retest"
-    await AsyncStorage.setItem(completionKey, 'true');
-    console.log('🎓 Removed retest key (no attempts left) and ensured completion key is set:', retestKey, completionKey);
-  }
+  // ⚠️ REMOVED: No longer delete completion keys - API handles filtering
+  // Completion keys are kept temporarily until API refresh
 }
 
 /**
@@ -144,25 +107,25 @@ export async function startRetest(
     test_id: number;
     test_type: string;
     retest_available?: boolean;
+    retest_is_completed?: boolean;
     retest_assignment_id?: number;
   }
 ): Promise<void> {
-  if (!test.retest_available) {
-    console.log('🎓 Retest not available - skipping startRetest');
+  // Only start retest if available and not completed (from API)
+  if (!test.retest_available || test.retest_is_completed) {
+    console.log('🎓 Retest not available or completed - skipping startRetest');
     return;
   }
 
   const testIdStr = String(test.test_id);
   const retestKey = `retest1_${studentId}_${test.test_type}_${testIdStr}`;
-  const completionKey = `test_completed_${studentId}_${test.test_type}_${testIdStr}`;
 
-  // Set retest key BEFORE navigation (web app pattern)
+  // Set retest key BEFORE navigation
   await AsyncStorage.setItem(retestKey, 'true');
   console.log('🎓 Set retest key:', retestKey);
 
-  // Clear completion key so test doesn't show as completed (web app pattern)
-  await AsyncStorage.removeItem(completionKey);
-  console.log('🎓 Cleared completion key for retest:', completionKey);
+  // ⚠️ REMOVED: No longer delete completion keys - API handles filtering
+  // Completion keys are kept temporarily until API refresh
 
   // Store retest_assignment_id for submission (web app pattern)
   if (test.retest_assignment_id) {
