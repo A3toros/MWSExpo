@@ -15,6 +15,7 @@ import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
+import MathText from '../../../../src/components/math/MathText';
 
 export default function TrueFalseTestScreen() {
   const { testId } = useLocalSearchParams();
@@ -702,15 +703,18 @@ export default function TrueFalseTestScreen() {
                     }`}>
                       {themeMode === 'cyberpunk' ? 'QUESTION:' : 'Question:'}
                     </Text>
-                    <Text className={`p-3 rounded-lg ${
+                    <View className={`p-3 rounded-lg ${
                       themeMode === 'cyberpunk' 
-                        ? 'text-cyan-200 bg-black border border-cyan-400/30' 
+                        ? 'bg-black border border-cyan-400/30' 
                         : themeMode === 'dark' 
-                        ? 'text-gray-200 bg-gray-700' 
-                        : 'text-gray-700 bg-gray-50'
+                        ? 'bg-gray-700' 
+                        : 'bg-gray-50'
                     }`}>
-                      {result.questionText}
-                    </Text>
+                      <MathText 
+                        text={result.questionText || ''}
+                        fontSize={16}
+                      />
+                    </View>
                   </View>
                   
                   <View className="space-y-2">

@@ -3,6 +3,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getThemeClasses } from '../utils/themeUtils';
+import MathText from './math/MathText';
 
 // TEST RESULTS COMPONENT - Complete Test Results Display for React Native
 // ✅ REWRITTEN: From web TestResults.jsx to React Native
@@ -237,26 +238,6 @@ export default function TestResults({
               }} 
             />
           </View>
-
-          {/* Action Buttons */}
-          <TouchableOpacity
-            onPress={onBackToCabinet}
-            className={`px-4 py-3 rounded-lg items-center flex-row justify-center ${
-              themeMode === 'cyberpunk' 
-                ? 'bg-black border border-cyan-400/30' 
-                : themeMode === 'dark' 
-                ? 'bg-blue-600' 
-                : 'bg-header-blue'
-            }`}
-          >
-            <Text className={`text-base font-semibold ml-2 ${
-              themeMode === 'cyberpunk' 
-                ? 'text-cyan-400 tracking-wider' 
-                : 'text-white'
-            }`}>
-              {themeMode === 'cyberpunk' ? '← BACK TO CABINET' : '← Back to Cabinet'}
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {/* Question Analysis - Only show for non-matching tests */}
@@ -299,9 +280,15 @@ export default function TestResults({
                     <Text className={`font-medium mb-2 ${themeMode === 'cyberpunk' ? 'text-cyan-300 tracking-wider' : themeClasses.text}`}>
                       {themeMode === 'cyberpunk' ? 'QUESTION:' : 'Question:'}
                     </Text>
-                    <Text className={`p-3 rounded-lg ${themeMode === 'cyberpunk' ? 'text-cyan-200 bg-black border border-cyan-400/30' : 'text-gray-700 bg-gray-50'}`}>
-                      {q.question}
-                    </Text>
+                    <View className={`p-3 rounded-lg ${themeMode === 'cyberpunk' ? 'bg-black border border-cyan-400/30' : 'bg-gray-50'}`}>
+                      {(testType === 'multiple_choice' || testType === 'true_false' || testType === 'input') ? (
+                        <MathText text={q.question} fontSize={14} />
+                      ) : (
+                        <Text className={`${themeMode === 'cyberpunk' ? 'text-cyan-200' : 'text-gray-700'}`}>
+                          {q.question}
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   
                   <View className="gap-3">
@@ -309,23 +296,53 @@ export default function TestResults({
                       <Text className={`font-medium mb-2 ${themeMode === 'cyberpunk' ? 'text-cyan-300 tracking-wider' : themeClasses.text}`}>
                         {themeMode === 'cyberpunk' ? 'YOUR ANSWER:' : 'Your Answer:'}
                       </Text>
-                      <Text className={`p-3 rounded-lg ${
+                      <View className={`p-3 rounded-lg ${
                         q.isCorrect 
-                          ? (themeMode === 'cyberpunk' ? 'bg-green-900/30 text-green-400 border border-green-400/30' : 'bg-green-100 text-green-800')
-                          : (themeMode === 'cyberpunk' ? 'bg-red-900/30 text-red-400 border border-red-400/30' : 'bg-red-100 text-red-800')
+                          ? (themeMode === 'cyberpunk' ? 'bg-green-900/30 border border-green-400/30' : 'bg-green-100')
+                          : (themeMode === 'cyberpunk' ? 'bg-red-900/30 border border-red-400/30' : 'bg-red-100')
                       }`}>
-                        {(q.userAnswer !== undefined && q.userAnswer !== null && String(q.userAnswer).length > 0)
-                          ? String(q.userAnswer)
-                          : (themeMode === 'cyberpunk' ? 'NO ANSWER PROVIDED' : 'No answer provided')}
-                      </Text>
+                        {(q.userAnswer !== undefined && q.userAnswer !== null && String(q.userAnswer).length > 0) ? (
+                          (testType === 'multiple_choice' || testType === 'input') ? (
+                            <MathText 
+                              text={String(q.userAnswer)} 
+                              fontSize={14}
+                            />
+                          ) : (
+                            <Text className={`${
+                              q.isCorrect 
+                                ? (themeMode === 'cyberpunk' ? 'text-green-400' : 'text-green-800')
+                                : (themeMode === 'cyberpunk' ? 'text-red-400' : 'text-red-800')
+                            }`}>
+                              {String(q.userAnswer)}
+                            </Text>
+                          )
+                        ) : (
+                          <Text className={`${
+                            q.isCorrect 
+                              ? (themeMode === 'cyberpunk' ? 'text-green-400' : 'text-green-800')
+                              : (themeMode === 'cyberpunk' ? 'text-red-400' : 'text-red-800')
+                          }`}>
+                            {themeMode === 'cyberpunk' ? 'NO ANSWER PROVIDED' : 'No answer provided'}
+                          </Text>
+                        )}
+                      </View>
                     </View>
                     <View>
                       <Text className={`font-medium mb-2 ${themeMode === 'cyberpunk' ? 'text-cyan-300 tracking-wider' : themeClasses.text}`}>
                         {themeMode === 'cyberpunk' ? 'CORRECT ANSWER:' : 'Correct Answer:'}
                       </Text>
-                      <Text className={`p-3 rounded-lg ${themeMode === 'cyberpunk' ? 'bg-blue-900/30 text-blue-400 border border-blue-400/30' : 'bg-blue-100 text-blue-800'}`}>
-                        {q.correctAnswer}
-                      </Text>
+                      <View className={`p-3 rounded-lg ${themeMode === 'cyberpunk' ? 'bg-blue-900/30 border border-blue-400/30' : 'bg-blue-100'}`}>
+                        {(testType === 'multiple_choice' || testType === 'input') ? (
+                          <MathText 
+                            text={q.correctAnswer} 
+                            fontSize={14}
+                          />
+                        ) : (
+                          <Text className={`${themeMode === 'cyberpunk' ? 'text-blue-400' : 'text-blue-800'}`}>
+                            {q.correctAnswer}
+                          </Text>
+                        )}
+                      </View>
                     </View>
                   </View>
                 </View>
@@ -374,6 +391,28 @@ export default function TestResults({
               </Text>
             </View>
           </View>
+        </View>
+
+        {/* Back to Dashboard Button - At bottom like multiple choice */}
+        <View className="pt-4">
+          <TouchableOpacity
+            onPress={onBackToCabinet}
+            className={`py-3 px-6 rounded-lg ${
+              themeMode === 'cyberpunk' 
+                ? 'bg-cyan-400' 
+                : themeMode === 'dark' 
+                ? 'bg-blue-600' 
+                : 'bg-[#8B5CF6]'
+            }`}
+          >
+            <Text className={`text-center font-semibold text-lg ${
+              themeMode === 'cyberpunk' 
+                ? 'text-black tracking-wider' 
+                : 'text-white'
+            }`}>
+              {themeMode === 'cyberpunk' ? 'BACK TO DASHBOARD' : 'Back to Dashboard'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     </ScrollView>

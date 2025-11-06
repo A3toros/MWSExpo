@@ -15,6 +15,7 @@ import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import TestHeader from '../../../../src/components/TestHeader';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
+import MathText from '../../../../src/components/math/MathText';
 
 export default function MultipleChoiceTestScreen() {
   const { testId } = useLocalSearchParams();
@@ -675,31 +676,70 @@ export default function MultipleChoiceTestScreen() {
                     </View>
                   </View>
                   
-                  <Text className={`text-base mb-4 ${
-                    themeMode === 'cyberpunk' ? 'text-cyan-200' : themeMode === 'dark' ? 'text-gray-300' : 'text-gray-700'
-                  }`}>{result.questionText || result.question}</Text>
+                  <View className="mb-4">
+                    <MathText 
+                      text={result.questionText || result.question || ''}
+                      fontSize={16}
+                    />
+                  </View>
                   
                   <View className="space-y-2">
                     <View className="flex-row justify-between">
                       <Text className={`font-semibold ${
                         themeMode === 'cyberpunk' ? 'text-cyan-300' : themeMode === 'dark' ? 'text-gray-300' : 'text-gray-600'
                       }`}>Your Answer:</Text>
-                      <Text className={`font-medium ${
-                        result.isCorrect ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {result.studentAnswer || 'No answer'}{result.studentAnswerText ? ` — ${result.studentAnswerText}` : ''}
-                      </Text>
+                      <View className="flex-1 ml-2 items-end">
+                        {result.studentAnswerText ? (
+                          <View className="flex-row items-center">
+                            <Text className={`mr-2 font-medium ${
+                              result.isCorrect ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              {result.studentAnswer || 'No answer'} —
+                            </Text>
+                            <View className="flex-1">
+                              <MathText 
+                                text={result.studentAnswerText}
+                                fontSize={14}
+                              />
+                            </View>
+                          </View>
+                        ) : (
+                          <Text className={`font-medium ${
+                            result.isCorrect ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {result.studentAnswer || 'No answer'}
+                          </Text>
+                        )}
+                      </View>
                     </View>
                     
                     <View className="flex-row justify-between">
                       <Text className={`font-semibold ${
                         themeMode === 'cyberpunk' ? 'text-cyan-300' : themeMode === 'dark' ? 'text-gray-300' : 'text-gray-600'
                       }`}>Correct Answer:</Text>
-                      <Text className={`font-medium ${
-                        themeMode === 'cyberpunk' ? 'text-cyan-200' : themeMode === 'dark' ? 'text-gray-100' : 'text-gray-800'
-                      }`}>
-                        {result.correctAnswer}{result.correctAnswerText ? ` — ${result.correctAnswerText}` : ''}
-                      </Text>
+                      <View className="flex-1 ml-2 items-end">
+                        {result.correctAnswerText ? (
+                          <View className="flex-row items-center">
+                            <Text className={`mr-2 font-medium ${
+                              themeMode === 'cyberpunk' ? 'text-cyan-200' : themeMode === 'dark' ? 'text-gray-100' : 'text-gray-800'
+                            }`}>
+                              {result.correctAnswer} —
+                            </Text>
+                            <View className="flex-1">
+                              <MathText 
+                                text={result.correctAnswerText}
+                                fontSize={14}
+                              />
+                            </View>
+                          </View>
+                        ) : (
+                          <Text className={`font-medium ${
+                            themeMode === 'cyberpunk' ? 'text-cyan-200' : themeMode === 'dark' ? 'text-gray-100' : 'text-gray-800'
+                          }`}>
+                            {result.correctAnswer}
+                          </Text>
+                        )}
+                      </View>
                     </View>
                   </View>
                 </View>

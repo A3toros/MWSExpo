@@ -4,7 +4,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'rea
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses } from '../../utils/themeUtils';
-import { renderMathInText } from '../../utils/mathRenderer';
+import MathText from '../math/MathText';
 
 type Props = {
   question: {
@@ -164,17 +164,12 @@ export default function TrueFalseQuestion({
         )}
       </View>
       
-      <Text className={`text-lg mb-4 ${
-        themeMode === 'cyberpunk' 
-          ? 'text-cyan-400 tracking-wider' 
-          : themeMode === 'dark' 
-          ? 'text-white' 
-          : 'text-gray-900'
-      }`}>
-        {renderMathInText(formatQuestionText(questionText)).map((part, idx) => 
-          typeof part === 'string' ? <Text key={idx}>{part}</Text> : <React.Fragment key={idx}>{part}</React.Fragment>
-        )}
-      </Text>
+      <View className="mb-4">
+        <MathText 
+          text={questionText}
+          fontSize={18}
+        />
+      </View>
       
       <View className="gap-3">
         <TouchableOpacity

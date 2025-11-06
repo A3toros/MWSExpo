@@ -4,7 +4,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'rea
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses } from '../../utils/themeUtils';
-import { renderMathInText } from '../../utils/mathRenderer';
+import MathText from '../math/MathText';
 
 type Props = {
   question: {
@@ -167,17 +167,12 @@ export default function MultipleChoiceQuestion({
         )}
       </View>
       
-      <Text className={`text-lg mb-4 ${
-        themeMode === 'cyberpunk' 
-          ? 'text-cyan-400 tracking-wider' 
-          : themeMode === 'dark' 
-          ? 'text-white' 
-          : 'text-gray-900'
-      }`}>
-        {renderMathInText(formatQuestionText(questionText)).map((part, idx) => 
-          typeof part === 'string' ? <Text key={idx}>{part}</Text> : <React.Fragment key={idx}>{part}</React.Fragment>
-        )}
-      </Text>
+      <View className="mb-4">
+        <MathText 
+          text={questionText}
+          fontSize={18}
+        />
+      </View>
       
       <View style={styles.optionsContainer}>
         {options.map((option, index) => {
@@ -235,17 +230,12 @@ export default function MultipleChoiceQuestion({
                     {optionLetter}
                   </Text>
                 </View>
-                <Text className={`flex-1 text-base ${
-                  themeMode === 'cyberpunk' 
-                    ? 'text-cyan-400 tracking-wider' 
-                    : themeMode === 'dark' 
-                    ? 'text-white' 
-                    : 'text-gray-700'
-                }`}>
-                  {renderMathInText(option || `Option ${optionLetter}`).map((part, idx) => 
-                    typeof part === 'string' ? <Text key={idx}>{part}</Text> : <React.Fragment key={idx}>{part}</React.Fragment>
-                  )}
-                </Text>
+                <View className="flex-1">
+                  <MathText 
+                    text={option || `Option ${optionLetter}`}
+                    fontSize={16}
+                  />
+                </View>
               </View>
             </TouchableOpacity>
           );

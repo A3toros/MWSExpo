@@ -12,6 +12,7 @@ import DrawingQuestion from './DrawingQuestion';
 import MatchingQuestion from './MatchingQuestion';
 import WordMatchingQuestion from './WordMatchingQuestion';
 import SpeakingQuestion from './SpeakingQuestion';
+import MathText from '../math/MathText';
 
 type BaseQuestion = {
   id: string | number;
@@ -121,15 +122,24 @@ export default function QuestionRenderer({
     }`}>
       {header}
       {(question.question_text || question.question) && (
-        <Text className={`text-base mb-4 leading-6 ${
-          themeMode === 'cyberpunk' 
-            ? 'text-cyan-400 tracking-wider' 
-            : themeMode === 'dark' 
-            ? 'text-white' 
-            : 'text-gray-700'
-        }`}>
-          {question.question_text || question.question}
-        </Text>
+        (qtype === 'multiple_choice' || qtype === 'true_false' || qtype === 'input') ? (
+          <View className="mb-4">
+            <MathText 
+              text={question.question_text || question.question || ''}
+              fontSize={16}
+            />
+          </View>
+        ) : (
+          <Text className={`text-base mb-4 leading-6 ${
+            themeMode === 'cyberpunk' 
+              ? 'text-cyan-400 tracking-wider' 
+              : themeMode === 'dark' 
+              ? 'text-white' 
+              : 'text-gray-700'
+          }`}>
+            {question.question_text || question.question}
+          </Text>
+        )
       )}
       {qtype === 'multiple_choice' && (
         <MultipleChoiceQuestion {...commonProps} />
