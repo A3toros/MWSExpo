@@ -15,6 +15,7 @@ import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
+import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
 
 export default function WordMatchingTestScreen() {
   const { testId } = useLocalSearchParams<{ testId: string }>();
@@ -39,9 +40,16 @@ export default function WordMatchingTestScreen() {
   const [leftOrder, setLeftOrder] = useState<number[] | null>(null);
   const [rightOrder, setRightOrder] = useState<number[] | null>(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
-  const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
-  const [caughtCheating, setCaughtCheating] = useState(false);
   const [studentId, setStudentId] = useState<string | null>(null);
+
+  // Anti-cheating detection hook
+  const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
+  const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
+    studentId: studentId || '',
+    testType: 'word_matching',
+    testId: testIdStr,
+    enabled: !!studentId && !!testId,
+  });
   
   // Timer refs to prevent re-initialization
   const timerInitializedRef = useRef<boolean>(false);
@@ -342,8 +350,8 @@ export default function WordMatchingTestScreen() {
         time_taken: timeElapsed,
         started_at: new Date().toISOString(),
         submitted_at: new Date().toISOString(),
-        caught_cheating: false,
-        visibility_change_times: 0,
+        caught_cheating: caughtCheating,
+        visibility_change_times: visibilityChangeTimes,
         is_completed: true,
         answers_by_id: answers,
         question_order: testData.leftWords?.map((_: any, i: number) => i) || []
@@ -354,6 +362,9 @@ export default function WordMatchingTestScreen() {
       console.log('🧩 Submission response:', response?.data);
       
       if (response.data.success) {
+        // Clear anti-cheating keys on successful submission
+        await clearCheatingKeys();
+        
         // Mark test as completed and clear retest keys (web app pattern)
         // @ts-ignore - testId from useLocalSearchParams can be string | string[], helper accepts string | number | string[]
         await markTestCompleted(studentId, 'word_matching', testId);
@@ -370,7 +381,7 @@ export default function WordMatchingTestScreen() {
       setIsSubmitting(false);
       setIsSubmittingToAPI(false);
     }
-  }, [user?.student_id, testId, testData, answers, caughtCheating, visibilityChangeTimes, timeElapsed]);
+  }, [user?.student_id, testId, testData, answers, caughtCheating, visibilityChangeTimes, timeElapsed, clearCheatingKeys]);
 
   // Store performSubmit in ref to avoid dependency issues
   useEffect(() => {

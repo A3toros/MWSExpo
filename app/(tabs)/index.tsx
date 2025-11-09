@@ -18,6 +18,8 @@ import { TestResult } from '../../src/types';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 import { ActiveTestsView, ResultsView, ProfileView, DashboardView } from '../../src/components/dashboard';
 import SettingsView from '../../src/components/dashboard/SettingsView';
+import FAQView from '../../src/components/dashboard/FAQView';
+import { LoadingModal, CyberpunkLoadingModal } from '../../src/components/modals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppDispatch, useAppSelector } from '../../src/store';
 import { logout } from '../../src/store/slices/authSlice';
@@ -70,8 +72,9 @@ export default function DashboardScreen() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [completedTests, setCompletedTests] = useState<Set<string>>(new Set());
   const [isCompletionStatusLoaded, setIsCompletionStatusLoaded] = useState(false);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'active' | 'results' | 'profile' | 'settings'>('active');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'active' | 'results' | 'profile' | 'settings' | 'help'>('active');
   const [studentId, setStudentId] = useState<string>('');
+  const [loadingProgress, setLoadingProgress] = useState({ cpu: 0, ram: 0, net: 0 });
 
   // Reanimated 3 values
   const menuTranslateX = useSharedValue(-Dimensions.get('window').width * 0.6);
@@ -81,6 +84,22 @@ export default function DashboardScreen() {
 
   const fetchData = useCallback(async () => {
     setError(null);
+    setLoading(true);
+    // Reset loading progress
+    setLoadingProgress({ cpu: 0, ram: 0, net: 0 });
+    
+    // Simulate loading progress for cyberpunk theme
+    let progressInterval: NodeJS.Timeout | null = null;
+    if (themeMode === 'cyberpunk') {
+      progressInterval = setInterval(() => {
+        setLoadingProgress(prev => ({
+          cpu: Math.min(prev.cpu + Math.random() * 15, 85),
+          ram: Math.min(prev.ram + Math.random() * 12, 70),
+          net: Math.min(prev.net + Math.random() * 10, 95),
+        }));
+      }, 200);
+    }
+    
     try {
       // Debug: Check if user is authenticated
       const token = await AsyncStorage.getItem('auth_token');
@@ -261,6 +280,22 @@ export default function DashboardScreen() {
                   });
                 }
               );
+              
+              // Clear completion key if retest is available and NOT completed (more attempts available)
+              // This allows students to retake the test even if they previously completed it
+              if (!test.retest_is_completed) {
+                const testKey = `${test.test_type}_${test.test_id}`;
+                const completionKey = `test_completed_${studentId}_${test.test_type}_${test.test_id}`;
+                await AsyncStorage.removeItem(completionKey);
+                console.log('🎓 Cleared completion key (retest available, not completed):', completionKey);
+                
+                // Also remove from completedTests set
+                setCompletedTests(prev => {
+                  const updated = new Set(prev);
+                  updated.delete(testKey);
+                  return updated;
+                });
+              }
             }
           }
         } catch (retestError) {
@@ -351,9 +386,22 @@ export default function DashboardScreen() {
         setError(`Failed to load data. ${e.response?.data?.message || e.message || 'Please check your connection and try again.'}`);
       }
     } finally {
+      // Clear progress interval if it exists
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+      
+      // Set progress to 100% when done
+      if (themeMode === 'cyberpunk') {
+        setLoadingProgress({ cpu: 100, ram: 100, net: 100 });
+        // Reset after animation completes
+        setTimeout(() => {
+          setLoadingProgress({ cpu: 0, ram: 0, net: 0 });
+        }, 500);
+      }
       setLoading(false);
     }
-  }, []);
+  }, [themeMode]);
 
   useEffect(() => {
     fetchData();
@@ -369,12 +417,40 @@ export default function DashboardScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    // Reset loading progress
+    setLoadingProgress({ cpu: 0, ram: 0, net: 0 });
+    
+    // Simulate loading progress for cyberpunk theme
+    let progressInterval: NodeJS.Timeout | null = null;
+    if (themeMode === 'cyberpunk') {
+      progressInterval = setInterval(() => {
+        setLoadingProgress(prev => ({
+          cpu: Math.min(prev.cpu + Math.random() * 15, 85),
+          ram: Math.min(prev.ram + Math.random() * 12, 70),
+          net: Math.min(prev.net + Math.random() * 10, 95),
+        }));
+      }, 200);
+    }
+    
     try {
       await fetchData();
     } finally {
+      // Clear progress interval if it exists
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+      
+      // Set progress to 100% when done
+      if (themeMode === 'cyberpunk') {
+        setLoadingProgress({ cpu: 100, ram: 100, net: 100 });
+        // Reset after animation completes
+        setTimeout(() => {
+          setLoadingProgress({ cpu: 0, ram: 0, net: 0 });
+        }, 500);
+      }
       setRefreshing(false);
     }
-  }, [fetchData]);
+  }, [fetchData, themeMode]);
 
   const handleLogout = useCallback(() => {
     Alert.alert(
@@ -541,7 +617,7 @@ export default function DashboardScreen() {
           } else if (view === 'dashboard') {
             setCurrentView('dashboard');
           } else {
-            setCurrentView(view as 'active' | 'results' | 'profile' | 'settings');
+            setCurrentView(view as 'active' | 'results' | 'profile' | 'settings' | 'help');
           }
         }}
         userName={user?.nickname || user?.name || 'Student'}
@@ -715,10 +791,30 @@ export default function DashboardScreen() {
           {currentView === 'settings' && (
             <SettingsView />
           )}
+
+          {currentView === 'help' && (
+            <FAQView />
+          )}
         </ScrollView>
 
     </View>
       </PanGestureHandler>
+
+      {/* Loading Modals */}
+      {themeMode === 'cyberpunk' ? (
+        <CyberpunkLoadingModal
+          visible={loading || refreshing}
+          message="LOADING DATA"
+          cpu={loadingProgress.cpu}
+          ram={loadingProgress.ram}
+          net={loadingProgress.net}
+        />
+      ) : (
+        <LoadingModal
+          visible={loading || refreshing}
+          message={refreshing ? "Refreshing..." : "Loading..."}
+        />
+      )}
     </ErrorBoundary>
   );
 }

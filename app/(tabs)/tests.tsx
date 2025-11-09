@@ -14,6 +14,7 @@ type ActiveTest = {
   assigned_at: number; 
   deadline?: number;
   retest_available?: boolean;
+  retest_is_completed?: boolean;
   retest_attempts_left?: number;
   retest_assignment_id?: number;
 };
@@ -49,6 +50,14 @@ export default function TestsScreen() {
           for (const test of testsData) {
             if (test.retest_available) {
               await processRetestAvailability(test, studentId);
+              
+              // Clear completion key if retest is available and NOT completed (more attempts available)
+              // This allows students to retake the test even if they previously completed it
+              if (!test.retest_is_completed) {
+                const completionKey = `test_completed_${studentId}_${test.test_type}_${test.test_id}`;
+                await AsyncStorage.removeItem(completionKey);
+                console.log('🎓 Tests tab: Cleared completion key (retest available, not completed):', completionKey);
+              }
             }
           }
         }

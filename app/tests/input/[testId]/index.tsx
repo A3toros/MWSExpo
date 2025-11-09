@@ -16,6 +16,7 @@ import TestResults from '../../../../src/components/TestResults';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { getRetestAssignmentId, markTestCompleted, handleRetestCompletion } from '../../../../src/utils/retestUtils';
+import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
 
 export default function TestRunnerScreen() {
   const { testId, type } = useLocalSearchParams<{ testId: string; type?: string }>();
@@ -40,9 +41,16 @@ export default function TestRunnerScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
-  const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
-  const [caughtCheating, setCaughtCheating] = useState(false);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
+
+  // Anti-cheating detection hook
+  const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
+  const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
+    studentId: user?.student_id || '',
+    testType: 'input',
+    testId: testIdStr,
+    enabled: !!user?.student_id && !!testId,
+  });
   const resultsCommittedRef = useRef<boolean>(false);
   const restorationDoneRef = useRef<string | null>(null); // Track which test was restored
 
@@ -348,55 +356,6 @@ export default function TestRunnerScreen() {
     };
   }, [loading, error, testData]);
 
-  // Anti-cheating tracking (like web app)
-  useEffect(() => {
-    const loadAntiCheatingData = async () => {
-      try {
-        const storageKey = `anti_cheating_input_${testId}`;
-        const data = await AsyncStorage.getItem(storageKey);
-        if (data) {
-          const parsed = JSON.parse(data);
-          setVisibilityChangeTimes(parsed.visibility_change_times || 0);
-          setCaughtCheating(parsed.caught_cheating || false);
-        }
-      } catch (e) {
-        console.log('Error loading anti-cheating data:', e);
-      }
-    };
-
-    if (testId) {
-      loadAntiCheatingData();
-    }
-  }, [testId]);
-
-  // Track app state changes for anti-cheating
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
-        // App went to background - increment visibility change count
-        setVisibilityChangeTimes(prev => {
-          const newCount = prev + 1;
-          // Save to AsyncStorage
-          const storageKey = `anti_cheating_input_${testId}`;
-          AsyncStorage.setItem(storageKey, JSON.stringify({
-            visibility_change_times: newCount,
-            caught_cheating: newCount >= 2, // 2+ changes = cheating
-            last_updated: new Date().toISOString()
-          }));
-          
-          // Mark as cheating if 2+ changes
-          if (newCount >= 2) {
-            setCaughtCheating(true);
-          }
-          
-          return newCount;
-        });
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, [testId]);
 
   const total = questions.length || 1;
   const progress = useMemo(() => Math.round(((currentIndex + 1) / total) * 100), [currentIndex, total]);
@@ -723,15 +682,23 @@ export default function TestRunnerScreen() {
         const response = await api.post('/api/submit-input-test', payload);
         
         if (response.data.success) {
-          // Handle retest completion (web app pattern) - write attempt keys and check completion
+          // Clear anti-cheating keys on successful submission
+          await clearCheatingKeys();
+          
+          // Handle retest completion (backend is authoritative)
           if (studentId) {
             const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
             const percentage = Math.round((computedScore / questions.length) * 100);
-            const passed = percentage >= 60;
-            const maxAttempts = testData?.retest_attempts_left || testData?.max_attempts || 3;
             
-            // Use handleRetestCompletion for retests (same as web app)
-            await handleRetestCompletion(studentId, 'input', testIdStr, maxAttempts, percentage, passed);
+            // Use handleRetestCompletion for retests (sets completion key, backend handles attempt tracking)
+            await handleRetestCompletion(studentId, 'input', testIdStr, {
+              success: true,
+              percentage: percentage,
+              percentage_score: percentage
+            });
+            
+            // Also mark test as completed using markTestCompleted for consistency
+            await markTestCompleted(studentId, 'input', testIdStr);
             
             // Cache the test results immediately after successful submission (web app pattern)
             const cacheKey = `student_results_table_${studentId}`;
@@ -794,7 +761,7 @@ export default function TestRunnerScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [testId, type, questions, answers, seconds, isLoadingUser, user?.student_id, testData, caughtCheating, visibilityChangeTimes]);
+  }, [testId, type, questions, answers, seconds, isLoadingUser, user?.student_id, testData, caughtCheating, visibilityChangeTimes, clearCheatingKeys]);
 
   // Use ref for handleSubmit to avoid timer effect re-running
   const handleSubmitRef = useRef<() => Promise<void>>();
@@ -950,6 +917,7 @@ export default function TestRunnerScreen() {
                     studentId={user?.student_id || ''}
                     value={value}
                     onChange={handleAnswerChange}
+                    textInputProps={textInputProps}
                   />
                 </View>
               );

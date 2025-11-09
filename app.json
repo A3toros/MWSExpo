@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MWS",
+    "name": "MWS Student",
     "slug": "mws-student",
     "version": "1.0.0",
     "description": "Student app for Mathayomwatsing School - Take tests, view results, and track academic progress",
@@ -35,11 +35,14 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.mathayomwatsing.student",
+      "versionCode": 1,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MICROPHONE",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE"
       ]
     },
     "extra": {

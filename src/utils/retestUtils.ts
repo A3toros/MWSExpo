@@ -124,8 +124,11 @@ export async function startRetest(
   await AsyncStorage.setItem(retestKey, 'true');
   console.log('🎓 Set retest key:', retestKey);
 
-  // ⚠️ REMOVED: No longer delete completion keys - API handles filtering
-  // Completion keys are kept temporarily until API refresh
+  // ⚠️ IMPORTANT: Clear completion key of original test when starting retest
+  // This allows student to take retest even if original test was completed
+  const completionKey = `test_completed_${studentId}_${test.test_type}_${testIdStr}`;
+  await AsyncStorage.removeItem(completionKey);
+  console.log('🎓 Cleared original test completion key for retest:', completionKey);
 
   // Store retest_assignment_id for submission (web app pattern)
   if (test.retest_assignment_id) {
@@ -138,9 +141,13 @@ export async function startRetest(
   try {
     // Common prefixes for saved answers/state across tests
     const suffix = `_${studentId}_${test.test_type}_${testIdStr}`;
+    const retestAssignKey = `retest_assignment_id_${studentId}_${test.test_type}_${testIdStr}`;
+    const retestKey = `retest1_${studentId}_${test.test_type}_${testIdStr}`;
     const allKeys = await AsyncStorage.getAllKeys();
     const toDelete = allKeys.filter(key => {
       if (!key) return false;
+      // ⚠️ IMPORTANT: Don't delete retest keys - they're needed for submission
+      if (key === retestAssignKey || key === retestKey) return false;
       return (
         key.endsWith(suffix) ||
         key.includes(`answers_${studentId}_${test.test_type}_${testIdStr}`) ||
@@ -163,16 +170,23 @@ export async function startRetest(
 }
 
 /**
- * Handle retest completion after submission - write attempt keys and check if completed
- * (same as web app pattern)
+ * Handle retest completion after submission - backend is authoritative
+ * (REPLACES lines 169-255 in retestUtils.ts)
+ * 
+ * ⚠️ CRITICAL: Do NOT track attempts in AsyncStorage
+ * Backend handles all attempt tracking in retest_targets table
+ * Backend writes to test_attempts.attempt_number
+ * Backend updates retest_targets.attempt_number, attempt_count, is_completed
  */
 export async function handleRetestCompletion(
   studentId: string,
   testType: string,
   testId: string | number,
-  maxAttempts: number,
-  percentage: number,
-  passed: boolean
+  submissionResult: {
+    success: boolean;
+    percentage?: number;
+    percentage_score?: number;
+  }
 ): Promise<void> {
   const testIdStr = Array.isArray(testId) ? testId[0] : String(testId || '');
   
@@ -189,68 +203,27 @@ export async function handleRetestCompletion(
     return;
   }
   
-  // Retest submission - write attempt key and check completion
-  const passedNow = passed || percentage >= 60; // 60% is passing threshold
+  // ⚠️ CRITICAL: Do NOT track attempts in AsyncStorage
+  // Backend handles all attempt tracking in retest_targets table
+  // Backend writes to test_attempts.attempt_number
+  // Backend updates retest_targets.attempt_number, attempt_count, is_completed
   
-  // If passed, mark last attempt slot (web app pattern)
-  if (passedNow) {
-    const lastSlotKey = `retest_attempt${maxAttempts}_${studentId}_${testType}_${testIdStr}`;
-    await AsyncStorage.setItem(lastSlotKey, 'true');
-    console.log('🎓 Passed retest, marking last-slot key:', lastSlotKey);
-  } else {
-    // Find next available attempt slot
-    let attemptNumber = 1;
-    for (let i = 1; i <= maxAttempts; i++) {
-      const attemptKey = `retest_attempt${i}_${studentId}_${testType}_${testIdStr}`;
-      const attemptExists = await AsyncStorage.getItem(attemptKey);
-      if (!attemptExists) {
-        attemptNumber = i;
-        break;
-      }
-    }
-    
-    const attemptKey = `retest_attempt${attemptNumber}_${studentId}_${testType}_${testIdStr}`;
-    await AsyncStorage.setItem(attemptKey, 'true');
-    console.log('🎓 Marked retest attempt as completed:', attemptKey);
-  }
+  // ⚠️ IMPORTANT: Mark retest as completed locally immediately to prevent duplicate starts
+  // This is a temporary measure until API refresh returns retest_is_completed = true
+  // The completion key prevents students from starting retest again while waiting for API
+  const completionKey = `test_completed_${studentId}_${testType}_${testIdStr}`;
   
-  // Count actual attempts used after marking this attempt
-  let usedAttempts = 0;
-  for (let i = 1; i <= 10; i++) {
-    const attemptKey = `retest_attempt${i}_${studentId}_${testType}_${testIdStr}`;
-    const attemptExists = await AsyncStorage.getItem(attemptKey);
-    if (attemptExists === 'true') {
-      usedAttempts++;
-    }
-  }
-  
-  // Check if attempts exhausted OR student passed
-  const attemptsLeft = maxAttempts - usedAttempts;
-  const shouldComplete = attemptsLeft <= 0 || passedNow;
-  
-  console.log('🎓 Retest completion check:', { 
-    usedAttempts, 
-    maxAttempts, 
-    attemptsLeft, 
-    passedNow, 
-    shouldComplete 
-  });
-  
-  if (shouldComplete) {
-    // Mark retest as completed (attempts exhausted OR passed)
-    const completionKey = `test_completed_${studentId}_${testType}_${testIdStr}`;
+  if (submissionResult.success) {
+    // Set completion key immediately (prevents duplicate starts while waiting for API)
+    // This is cleared/overridden on next API refresh when backend returns retest_is_completed = true
     await AsyncStorage.setItem(completionKey, 'true');
-    console.log('🎓 Marked retest as completed (attempts exhausted or passed):', completionKey);
+    console.log('🎓 Marked retest as completed locally (prevents duplicate starts until API refresh):', completionKey);
     
-    // Set retest_attempts metadata so button logic can check if attempts are exhausted
-    const attemptsMetaKey = `retest_attempts_${studentId}_${testType}_${testIdStr}`;
-    await AsyncStorage.setItem(attemptsMetaKey, JSON.stringify({ used: usedAttempts, max: maxAttempts }));
-    console.log('🎓 Set retest attempts metadata:', attemptsMetaKey, { used: usedAttempts, max: maxAttempts });
-  } else {
-    // Still have attempts left - set metadata but don't mark as completed
-    const attemptsMetaKey = `retest_attempts_${studentId}_${testType}_${testIdStr}`;
-    await AsyncStorage.setItem(attemptsMetaKey, JSON.stringify({ used: usedAttempts, max: maxAttempts }));
-    console.log('🎓 Set retest attempts metadata (attempts remaining):', attemptsMetaKey, { used: usedAttempts, max: maxAttempts });
+    // ⚠️ REMOVED: All AsyncStorage attempt tracking (retest_attempt1_, retest_attempt2_, etc.)
+    // ⚠️ REMOVED: Manual attempt counting
+    // ⚠️ REMOVED: Manual completion calculation based on attempts
+    // Backend will return retest_is_completed flag on next API call
+    // If backend says retest is NOT completed (e.g., more attempts available), API refresh will clear this key
   }
 }
 

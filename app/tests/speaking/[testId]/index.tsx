@@ -9,6 +9,7 @@ import { SpeakingTestProvider } from '../../../../src/contexts/SpeakingTestConte
 import SpeakingTestStudent from '../../../../src/components/test/SpeakingTestStudent';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
+import { markTestCompleted } from '../../../../src/utils/retestUtils';
 
 export default function SpeakingTestScreen() {
   const { themeMode } = useTheme();
@@ -280,17 +281,10 @@ export default function SpeakingTestScreen() {
 
   const handleTestComplete = useCallback(async (results: any) => {
     try {
-      // Mark test as completed (web app pattern)
-      const completionKey = `test_completed_${user?.student_id}_speaking_${testId}`;
-      await AsyncStorage.setItem(completionKey, 'true');
-
-      // Clear retest key if it exists
-      const retestKey = `retest1_${user?.student_id}_speaking_${testId}`;
-      await AsyncStorage.removeItem(retestKey);
-
-      // Clear retest assignment key if it exists
-      const retestAssignKey = `retest_assignment_id_${user?.student_id}_speaking_${testId}`;
-      await AsyncStorage.removeItem(retestAssignKey);
+      // Mark test as completed using helper (web app pattern)
+      if (user?.student_id) {
+        await markTestCompleted(user.student_id, 'speaking', testId);
+      }
       
       // Store result for caching (web app pattern)
       await AsyncStorage.setItem(`speaking_test_result_${testId}`, JSON.stringify(results));

@@ -15,6 +15,7 @@ import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
 import { academicCalendarService } from '../../../../src/services/AcademicCalendarService';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
+import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
 
 // Using Drax for drag and drop; no custom gesture math needed
 
@@ -40,10 +41,17 @@ export default function MatchingTestScreen() {
   const [arrows, setArrows] = useState<any[]>([]);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false); // confirms submission
-  const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
-  const [caughtCheating, setCaughtCheating] = useState(false);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [studentId, setStudentId] = useState<string | null>(null);
+
+  // Anti-cheating detection hook
+  const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
+  const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
+    studentId: studentId || '',
+    testType: 'matching_type',
+    testId: testIdStr,
+    enabled: !!studentId && !!testId,
+  });
   
   // Timer refs to prevent re-initialization
   const timerInitializedRef = useRef<boolean>(false);
@@ -509,6 +517,9 @@ export default function MatchingTestScreen() {
       if (DEBUG_SUBMIT) console.log('Matching RN: submission response', response?.data);
       
       if (response.data.success) {
+        // Clear anti-cheating keys on successful submission
+        await clearCheatingKeys();
+        
         // Mark test as completed and clear retest keys (web app pattern)
         const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
         await markTestCompleted(studentId, 'matching_type', testIdStr);
@@ -535,7 +546,7 @@ export default function MatchingTestScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [user?.student_id, testId, testData, blocks, placedWords, caughtCheating, visibilityChangeTimes, timeElapsed]);
+  }, [user?.student_id, testId, testData, blocks, placedWords, caughtCheating, visibilityChangeTimes, timeElapsed, clearCheatingKeys]);
 
   // Store performSubmit in ref to avoid dependency issues
   useEffect(() => {
@@ -747,54 +758,6 @@ export default function MatchingTestScreen() {
   }, [loadTestData]);
 
   // Anti-cheating tracking (like web app)
-  useEffect(() => {
-    const loadAntiCheatingData = async () => {
-      try {
-        const storageKey = `anti_cheating_matching_type_${testId}`;
-        const data = await AsyncStorage.getItem(storageKey);
-        if (data) {
-          const parsed = JSON.parse(data);
-          setVisibilityChangeTimes(parsed.visibility_change_times || 0);
-          setCaughtCheating(parsed.caught_cheating || false);
-        }
-      } catch (e) {
-        console.log('Error loading anti-cheating data:', e);
-      }
-    };
-
-    if (testId) {
-      loadAntiCheatingData();
-    }
-  }, [testId]);
-
-  // Track app state changes for anti-cheating
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
-        // App went to background - increment visibility change count
-        setVisibilityChangeTimes(prev => {
-          const newCount = prev + 1;
-          // Save to AsyncStorage
-          const storageKey = `anti_cheating_matching_type_${testId}`;
-          AsyncStorage.setItem(storageKey, JSON.stringify({
-            visibility_change_times: newCount,
-            caught_cheating: newCount >= 2, // 2+ changes = cheating
-            last_updated: new Date().toISOString()
-          }));
-          
-          // Mark as cheating if 2+ changes
-          if (newCount >= 2) {
-            setCaughtCheating(true);
-          }
-          
-          return newCount;
-        });
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, [testId]);
 
   if (loading) {
     return (

@@ -9,3 +9,16 @@ npx expo run:android
 npm i -g eas-cli
 eas build:configure
 eas build -p android --profile production --local
+
+npx expo prebuild --platform android
+ cd android
+.\gradlew bundleRelease  aab
+.\gradlew assembleRelease apk
+
+keytool -genkeypair -v \
+  -storetype PKCS12 \
+  -keystore android/app/my-release-key.keystore \
+  -alias my-key-alias \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000

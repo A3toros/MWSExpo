@@ -16,6 +16,7 @@ import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import TestHeader from '../../../../src/components/TestHeader';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 import MathText from '../../../../src/components/math/MathText';
+import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
 
 export default function MultipleChoiceTestScreen() {
   const { testId } = useLocalSearchParams();
@@ -35,9 +36,15 @@ export default function MultipleChoiceTestScreen() {
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [showResults, setShowResults] = useState(false);
   const [testResults, setTestResults] = useState<any>(null);
-  const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
-  const [caughtCheating, setCaughtCheating] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+
+  // Anti-cheating detection hook
+  const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
+    studentId: user?.student_id || '',
+    testType: 'multiple_choice',
+    testId: testId || '',
+    enabled: !!user?.student_id && !!testId,
+  });
 
   // Simple student ID extraction
   const getStudentIdFromToken = async (): Promise<string | null> => {
@@ -213,55 +220,6 @@ export default function MultipleChoiceTestScreen() {
     loadTestData();
   }, [loadTestData]);
 
-  // Anti-cheating tracking (like web app)
-  useEffect(() => {
-    const loadAntiCheatingData = async () => {
-      try {
-        const storageKey = `anti_cheating_multiple_choice_${testId}`;
-        const data = await AsyncStorage.getItem(storageKey);
-        if (data) {
-          const parsed = JSON.parse(data);
-          setVisibilityChangeTimes(parsed.visibility_change_times || 0);
-          setCaughtCheating(parsed.caught_cheating || false);
-        }
-      } catch (e) {
-        console.log('Error loading anti-cheating data:', e);
-      }
-    };
-
-    if (testId) {
-      loadAntiCheatingData();
-    }
-  }, [testId]);
-
-  // Track app state changes for anti-cheating
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
-        // App went to background - increment visibility change count
-        setVisibilityChangeTimes(prev => {
-          const newCount = prev + 1;
-          // Save to AsyncStorage
-          const storageKey = `anti_cheating_multiple_choice_${testId}`;
-          AsyncStorage.setItem(storageKey, JSON.stringify({
-            visibility_change_times: newCount,
-            caught_cheating: newCount >= 2, // 2+ changes = cheating
-            last_updated: new Date().toISOString()
-          }));
-          
-          // Mark as cheating if 2+ changes
-          if (newCount >= 2) {
-            setCaughtCheating(true);
-          }
-          
-          return newCount;
-        });
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, [testId]);
 
   // Handle answer change
   const handleAnswerChange = useCallback((questionId: string | number, answer: any) => {
@@ -362,6 +320,15 @@ export default function MultipleChoiceTestScreen() {
       const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
       const retestAssignmentId = await getRetestAssignmentId(studentId, 'multiple_choice', testIdStr);
       
+      console.log('🎓 [MULTIPLE_CHOICE] Retest submission payload debug:', {
+        studentId,
+        testId: testIdStr,
+        retestAssignmentId,
+        retestAssignmentIdType: typeof retestAssignmentId,
+        retestAssignmentIdValue: retestAssignmentId,
+        isRetest: !!retestAssignmentId
+      });
+      
       const submissionData = {
         test_id: testId,
         test_name: testData.test_name || testData.title,
@@ -391,9 +358,19 @@ export default function MultipleChoiceTestScreen() {
         parent_test_id: testId
       };
 
+      console.log('🎓 [MULTIPLE_CHOICE] Full submission payload:', {
+        ...submissionData,
+        retest_assignment_id: submissionData.retest_assignment_id,
+        retest_assignment_id_type: typeof submissionData.retest_assignment_id,
+        hasRetestAssignmentId: !!submissionData.retest_assignment_id
+      });
+
       const response = await api.post('/api/submit-multiple-choice-test', submissionData);
       
       if (response.data.success) {
+        // Clear anti-cheating keys on successful submission
+        await clearCheatingKeys();
+        
         // Mark test as completed and clear retest keys (web app pattern)
         const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
         await markTestCompleted(studentId, 'multiple_choice', testIdStr);
@@ -447,7 +424,7 @@ export default function MultipleChoiceTestScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [user?.student_id, testData, questions, answers, testId, caughtCheating, visibilityChangeTimes, isLoadingUser]);
+  }, [user?.student_id, testData, questions, answers, testId, caughtCheating, visibilityChangeTimes, isLoadingUser, clearCheatingKeys]);
 
   // Timer effect - only start if test has timer enabled
   useEffect(() => {

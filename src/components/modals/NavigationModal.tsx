@@ -60,32 +60,30 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
       transparent={true}
       animationType="fade"
     >
-      <View className={modalStyles.overlay}>
-        <View className={modalStyles.container}>
-          <Text className={`${modalStyles.title} ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
+      <View className={`flex-1 justify-center items-center px-4 ${modalStyles.overlay}`}>
+        <View className={`${modalStyles.container} p-6`}>
+          <Text className={`${modalStyles.title} ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''} mb-3`}>
             {themeMode === 'cyberpunk' ? title.toUpperCase() : title}
           </Text>
           
-          <Text className={`${modalStyles.text} ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
+          <Text className={`${modalStyles.text} ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''} mb-6`}>
             {themeMode === 'cyberpunk' ? message.toUpperCase() : message}
           </Text>
           
-          <View className="flex-row space-x-3">
-            <>
-              <View className="flex-1">
-                <ThemedButton
-                  title={themeMode === 'cyberpunk' ? 'STAY' : 'Stay'}
-                  onPress={onCancel}
-                />
-              </View>
-              <View className="flex-1">
-                <ThemedButton
-                  title={themeMode === 'cyberpunk' ? 'LEAVE' : 'Leave'}
-                  onPress={onConfirm}
-                  variant="modal"
-                />
-              </View>
-            </>
+          <View className="flex-row justify-center">
+            <View className={`flex-1 max-w-[140px] ${themeMode === 'cyberpunk' ? 'mr-3' : 'mr-4'}`}>
+              <ThemedButton
+                title={themeMode === 'cyberpunk' ? 'STAY' : 'Stay'}
+                onPress={onCancel}
+              />
+            </View>
+            <View className="flex-1 max-w-[140px]">
+              <ThemedButton
+                title={themeMode === 'cyberpunk' ? 'LEAVE' : 'Leave'}
+                onPress={onConfirm}
+                variant="modal"
+              />
+            </View>
           </View>
         </View>
       </View>

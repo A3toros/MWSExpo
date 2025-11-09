@@ -21,6 +21,14 @@ type Props = {
   onAnswerChange?: (questionId: string | number, answer: string) => void;
   showCorrectAnswers?: boolean;
   studentId?: string | null;
+  textInputProps?: {
+    contextMenuHidden?: boolean;
+    onFocus?: () => void;
+    textContentType?: 'none';
+    autoComplete?: 'off';
+    autoCorrect?: boolean;
+    spellCheck?: boolean;
+  };
 };
 
 export default function InputQuestion({
@@ -31,7 +39,8 @@ export default function InputQuestion({
   studentAnswer,
   onAnswerChange,
   showCorrectAnswers = false,
-  studentId = null
+  studentId = null,
+  textInputProps
 }: Props) {
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);

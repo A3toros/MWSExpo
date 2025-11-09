@@ -1,19 +1,22 @@
 /** @jsxImportSource nativewind */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Image } from 'react-native';
 import { router } from 'expo-router';
-import { Alert } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getThemeClasses } from '../utils/themeUtils';
+import { NavigationModal } from './modals/NavigationModal';
+import { useAndroidBackButton } from '../hooks/useAndroidBackButton';
 
 interface TestHeaderProps {
   testName: string;
   onExit?: () => void;
+  enableBackButton?: boolean; // Enable/disable Android back button interception
 }
 
-export default function TestHeader({ testName, onExit }: TestHeaderProps) {
+export default function TestHeader({ testName, onExit, enableBackButton = true }: TestHeaderProps) {
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);
+  const [showExitModal, setShowExitModal] = useState(false);
   
   const getArrowSource = () => {
     switch (themeMode) {
@@ -24,27 +27,28 @@ export default function TestHeader({ testName, onExit }: TestHeaderProps) {
   };
 
   const handleBackPress = () => {
-    Alert.alert(
-      themeMode === 'cyberpunk' ? 'EXIT TEST' : 'Exit Test',
-      themeMode === 'cyberpunk' 
-        ? 'ARE YOU SURE YOU WANT TO GO BACK TO CABINET? YOUR PROGRESS WILL BE SAVED BUT YOU WILL EXIT THE TEST.'
-        : 'Are you sure you want to go back to cabinet? Your progress will be saved but you will exit the test.',
-      [
-        { text: themeMode === 'cyberpunk' ? 'CANCEL' : 'Cancel', style: 'cancel' },
-        { 
-          text: themeMode === 'cyberpunk' ? 'GO BACK' : 'Go Back', 
-          style: 'destructive', 
-          onPress: () => {
-            if (onExit) {
-              onExit();
-            } else {
-              router.back();
-            }
-          }
-        }
-      ]
-    );
+    // Prevent showing duplicate modals if already visible
+    if (showExitModal) {
+      return;
+    }
+    setShowExitModal(true);
   };
+
+  const handleConfirm = () => {
+    setShowExitModal(false);
+    if (onExit) {
+      onExit();
+    } else {
+      router.back();
+    }
+  };
+
+  const handleCancel = () => {
+    setShowExitModal(false);
+  };
+
+  // Intercept Android back button
+  useAndroidBackButton(enableBackButton, handleBackPress);
 
   return (
     <View className={`shadow-md z-50 ${
@@ -54,7 +58,7 @@ export default function TestHeader({ testName, onExit }: TestHeaderProps) {
         ? 'bg-gray-800' 
         : 'bg-header-blue'
     }`}>
-      <View className="px-4 py-3">
+      <View className="px-4 pt-4 pb-3">
         <View className="flex-row items-center">
           <TouchableOpacity 
             className={`w-10 h-10 rounded-full justify-center items-center mr-3 ${
@@ -80,6 +84,17 @@ export default function TestHeader({ testName, onExit }: TestHeaderProps) {
           </View>
         </View>
       </View>
+
+      {/* Navigation Modal for exit confirmation */}
+      <NavigationModal
+        visible={showExitModal}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+        title={themeMode === 'cyberpunk' ? 'EXIT TEST' : 'Exit Test'}
+        message={themeMode === 'cyberpunk' 
+          ? 'ARE YOU SURE YOU WANT TO GO BACK TO CABINET? YOUR PROGRESS WILL BE SAVED BUT YOU WILL EXIT THE TEST.'
+          : 'Are you sure you want to go back to cabinet? Your progress will be saved but you will exit the test.'}
+      />
     </View>
   );
 }

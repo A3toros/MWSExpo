@@ -237,19 +237,6 @@ export default function SwipeMenuModern({
                   }}
                   delay={700}
                 />
-                <MenuItem
-                  icon="ℹ️"
-                  imageSource={themeMode !== 'cyberpunk' ? require('../../../assets/images/menu/about.png') : undefined}
-                  title="About"
-                  subtitle="App information"
-                  cyberStyle={themeMode === 'cyberpunk'}
-                  color={themeMode === 'cyberpunk' ? 'red' : undefined}
-                  onPress={() => {
-                    onClose();
-                    onNavigate('about');
-                  }}
-                  delay={750}
-                />
               </MenuSection>
             </View>
 

@@ -13,6 +13,8 @@ import { AttemptStorageService } from '../../services/AttemptStorageService';
 import { academicCalendarService } from '../../services/AcademicCalendarService';
 import { ThemeMode } from '../../contexts/ThemeContext';
 import { getThemeClasses } from '../../utils/themeUtils';
+import { getRetestAssignmentId, handleRetestCompletion } from '../../utils/retestUtils';
+import { useAntiCheatingDetection } from '../../hooks/useAntiCheatingDetection';
 
 interface SpeakingTestStudentProps {
   testId: string;
@@ -43,7 +45,6 @@ export default function SpeakingTestStudent({
   // Helper function to decode JWT token and extract student ID
   const getStudentIdFromToken = async (): Promise<string | null> => {
     try {
-      const { SecureToken } = await import('../../utils/secureTokenStorage');
       const token = await SecureToken.get();
       if (!token) return null;
       
@@ -74,6 +75,15 @@ export default function SpeakingTestStudent({
   // Use prop studentId if provided, otherwise use extracted from token
   const studentId = propStudentId || extractedStudentId || 'unknown';
   console.log('🎤 Using student ID:', studentId, '(prop:', propStudentId, ', extracted:', extractedStudentId, ')');
+
+  // Anti-cheating detection hook
+  const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
+  const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
+    studentId: studentId || '',
+    testType: 'speaking',
+    testId: testIdStr,
+    enabled: !!studentId && !!testId && studentId !== 'unknown',
+  });
 
   // Submit final results to database
   const submitFinalResults = async (audioUri: string, duration: number, analysis: any) => {
@@ -110,6 +120,9 @@ export default function SpeakingTestStudent({
         throw new Error('No current academic period found');
       }
       
+      // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
+      const retestAssignmentId = await getRetestAssignmentId(studentId, 'speaking', testId);
+      
       const submissionData = {
         test_id: testId,
         test_name: testName,
@@ -123,10 +136,10 @@ export default function SpeakingTestStudent({
         time_taken: timeTaken,
         started_at: startedAt,
         submitted_at: endTime.toISOString(),
-        caught_cheating: false,
-        visibility_change_times: 0,
+        caught_cheating: caughtCheating,
+        visibility_change_times: visibilityChangeTimes,
         is_completed: true,
-        retest_assignment_id: null, // Like web app: Number or null
+        retest_assignment_id: retestAssignmentId, // Get from AsyncStorage (web app pattern)
         parent_test_id: testId,
         // Include already processed results
         transcript: analysis.transcript,
@@ -167,16 +180,16 @@ export default function SpeakingTestStudent({
       console.log('🎤 Final results submitted successfully');
       setHasSubmitted(true);
       
-      // Mark test as completed (like word matching test)
-      const completionKey = `test_completed_${studentId}_speaking_${testId}`;
-      await AsyncStorage.setItem(completionKey, 'true');
+      // Clear anti-cheating keys on successful submission
+      await clearCheatingKeys();
       
-      // Clear retest keys if they exist
-      const retestKey = `retest1_${studentId}_speaking_${testId}`;
-      await AsyncStorage.removeItem(retestKey);
-      
-      const retestAssignKey = `retest_assignment_id_${studentId}_speaking_${testId}`;
-      await AsyncStorage.removeItem(retestAssignKey);
+      // Handle retest completion (backend is authoritative)
+      const percentage = analysis?.overall_score || 0;
+      await handleRetestCompletion(studentId, 'speaking', testId, {
+        success: true,
+        percentage: percentage,
+        percentage_score: percentage
+      });
       
       console.log('🎤 Test marked as completed in AsyncStorage');
     } catch (submitError: any) {

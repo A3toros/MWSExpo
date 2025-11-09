@@ -1,23 +1,64 @@
 /** @jsxImportSource nativewind */
-import React from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { Modal } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getModalStyles } from '../../utils/themeUtils';
+import { ErrorModal } from './ErrorModal';
+import { router } from 'expo-router';
 
 interface LoadingModalProps {
   visible: boolean;
   message?: string;
   showSpinner?: boolean;
+  onTimeout?: () => void; // Optional callback when timeout occurs
 }
 
 export const LoadingModal: React.FC<LoadingModalProps> = ({
   visible,
   message = "Loading...",
-  showSpinner = true
+  showSpinner = true,
+  onTimeout
 }) => {
   const { themeMode } = useTheme();
   const modalStyles = getModalStyles(themeMode);
+  
+  // Timeout state
+  const [showError, setShowError] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+
+  // Handle timeout
+  useEffect(() => {
+    if (visible) {
+      // Start timeout timer (10 seconds)
+      startTimeRef.current = Date.now();
+      setShowError(false);
+      
+      timeoutRef.current = setTimeout(() => {
+        console.log('[LoadingModal] Timeout after 10 seconds');
+        setShowError(true);
+        if (onTimeout) {
+          onTimeout();
+        }
+      }, 10000);
+    } else {
+      // Clear timeout when hidden
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      startTimeRef.current = null;
+      setShowError(false);
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [visible, onTimeout]);
 
   const overlayBg = themeMode === 'cyberpunk'
     ? 'bg-black/90'
@@ -65,6 +106,31 @@ export const LoadingModal: React.FC<LoadingModalProps> = ({
           </Text>
         </View>
       </View>
+
+      {/* Error Modal for timeout */}
+      <ErrorModal
+        visible={showError}
+        onRetry={() => {
+          setShowError(false);
+          // Try to reload using expo-updates if available, otherwise navigate to same route
+          try {
+            // @ts-ignore - expo-updates may not be installed
+            const Updates = require('expo-updates');
+            if (Updates.reloadAsync) {
+              Updates.reloadAsync();
+              return;
+            }
+          } catch (e) {
+            // expo-updates not available, use router navigation
+          }
+          
+          // Fallback: navigate to current route to refresh
+          const currentPath = router.pathname || '/';
+          router.replace(currentPath as any);
+        }}
+        title="Loading Timeout"
+        message="Something went wrong. Please try again."
+      />
     </Modal>
   );
 };

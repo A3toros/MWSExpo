@@ -50,43 +50,8 @@ export function ActiveTestsView({
   const cyberpunkClasses = getCyberpunkClasses();
   const { animatedStyle: pulseStyle, startPulse } = useCyberpunkPulse();
   const { glowStyle, startGlow } = useCyberpunkGlow();
-  const [retestAttempts, setRetestAttempts] = useState<Record<string, { used: number; max: number }>>({});
   
   const skeletonItems = Array.from({ length: 3 }).map((_, i) => i);
-  
-  // Load retest attempts metadata from AsyncStorage (same as web app)
-  useEffect(() => {
-    if (!studentId) return;
-    
-    const loadRetestAttempts = async () => {
-      try {
-        const keys = await AsyncStorage.getAllKeys();
-        const attemptsMetaKeys = keys.filter(key => 
-          key.startsWith(`retest_attempts_${studentId}_`)
-        );
-        
-        const attemptsData: Record<string, { used: number; max: number }> = {};
-        for (const key of attemptsMetaKeys) {
-          try {
-            const value = await AsyncStorage.getItem(key);
-            if (value) {
-              const data = JSON.parse(value);
-              attemptsData[key] = data;
-            }
-          } catch (e) {
-            console.warn('Error parsing retest attempts metadata:', key, e);
-          }
-        }
-        
-        setRetestAttempts(attemptsData);
-        console.log('🎓 Loaded retest attempts metadata:', attemptsData);
-      } catch (e) {
-        console.warn('Error loading retest attempts metadata:', e);
-      }
-    };
-    
-    loadRetestAttempts();
-  }, [studentId, tests]);
 
   return (
     <View className={`m-4 ${themeClasses.background}`}>

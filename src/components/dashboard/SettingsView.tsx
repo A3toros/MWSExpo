@@ -1,15 +1,81 @@
 /** @jsxImportSource nativewind */
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Switch, Alert } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getThemeClasses, getCyberpunkClasses } from '../../utils/themeUtils';
+import { notificationService } from '../../services/notificationService';
 
 const SettingsView: React.FC = () => {
   const { themeMode, setTheme } = useTheme();
   const [selectedTheme, setSelectedTheme] = useState<typeof themeMode>(themeMode);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationStatus, setNotificationStatus] = useState<'enabled' | 'disabled' | 'permissions_required'>('disabled');
   
   const themeClasses = getThemeClasses(themeMode);
   const cyberpunkClasses = getCyberpunkClasses();
+
+  // Load notification status on mount
+  useEffect(() => {
+    const loadNotificationStatus = async () => {
+      try {
+        const enabled = await notificationService.isEnabled();
+        const hasPermissions = await notificationService.checkPermissions();
+        
+        setNotificationsEnabled(enabled);
+        if (enabled && hasPermissions) {
+          setNotificationStatus('enabled');
+        } else if (enabled && !hasPermissions) {
+          setNotificationStatus('permissions_required');
+        } else {
+          setNotificationStatus('disabled');
+        }
+      } catch (error) {
+        console.error('Error loading notification status:', error);
+      }
+    };
+
+    loadNotificationStatus();
+  }, []);
+
+  const handleNotificationToggle = async (value: boolean) => {
+    try {
+      if (value) {
+        // Enabling notifications - check permissions first
+        const hasPermissions = await notificationService.checkPermissions();
+        
+        if (!hasPermissions) {
+          // Request permissions if not granted
+          const granted = await notificationService.requestPermissions();
+          if (!granted) {
+            Alert.alert(
+              'Permissions Required',
+              'Notification permissions are required to receive test notifications. Please enable them in your device settings.',
+              [{ text: 'OK' }]
+            );
+            // Still allow toggle to be enabled, but show permissions required status
+            await notificationService.setEnabled(value);
+            setNotificationsEnabled(value);
+            setNotificationStatus('permissions_required');
+            return;
+          }
+        }
+      }
+
+      await notificationService.setEnabled(value);
+      setNotificationsEnabled(value);
+      
+      if (value) {
+        const hasPermissions = await notificationService.checkPermissions();
+        setNotificationStatus(hasPermissions ? 'enabled' : 'permissions_required');
+      } else {
+        setNotificationStatus('disabled');
+      }
+    } catch (error) {
+      console.error('Error toggling notifications:', error);
+      Alert.alert('Error', 'Failed to update notification settings. Please try again.');
+    }
+  };
+
 
   const themes = [
     { id: 'light', name: 'Light', description: 'Clean and bright interface' },
@@ -141,56 +207,6 @@ const SettingsView: React.FC = () => {
           </View>
         </View>
 
-        {/* Cyberpunk Preview */}
-        {selectedTheme === 'cyberpunk' && (
-          <View className="mb-8">
-            <Text className={`text-xl font-semibold ${cyberpunkClasses.text.primary} mb-4 tracking-wider`}>
-              CYBERPUNK PREVIEW
-            </Text>
-            
-            <View className="p-4 rounded-xl bg-black border-2 border-cyan-400">
-              <View className="flex-row items-center justify-between mb-3">
-                <Text className="text-cyan-400 font-bold tracking-wider text-lg">
-                  SYSTEM STATUS: ONLINE
-                </Text>
-                <View className="flex-row space-x-1">
-                  <View className="w-2 h-2 bg-cyan-400 rounded-full" />
-                  <View className="w-2 h-2 bg-cyan-400 rounded-full" />
-                  <View className="w-2 h-2 bg-cyan-400 rounded-full" />
-                </View>
-              </View>
-              
-              <Text className="text-yellow-400 text-sm mb-3 tracking-wider">
-                NEURAL INTERFACE CONNECTED
-              </Text>
-              
-              <View className="flex-row space-x-3 mb-3">
-                <View className="flex-1 bg-black border border-cyan-400 rounded-lg p-2">
-                  <Text className="text-cyan-400 text-xs font-bold tracking-wider text-center">CPU</Text>
-                  <Text className="text-cyan-400 text-xs text-center">87%</Text>
-                </View>
-                <View className="flex-1 bg-black border border-yellow-400 rounded-lg p-2">
-                  <Text className="text-yellow-400 text-xs font-bold tracking-wider text-center">RAM</Text>
-                  <Text className="text-yellow-400 text-xs text-center">64%</Text>
-                </View>
-                <View className="flex-1 bg-black border border-red-400 rounded-lg p-2">
-                  <Text className="text-red-400 text-xs font-bold tracking-wider text-center">NET</Text>
-                  <Text className="text-red-400 text-xs text-center">100%</Text>
-                </View>
-              </View>
-              
-              <View className="flex-row space-x-2">
-                <View className="w-3 h-3 bg-cyan-400 rounded-full" />
-                <View className="w-3 h-3 bg-yellow-400 rounded-full" />
-                <View className="w-3 h-3 bg-red-400 rounded-full" />
-                <Text className="text-cyan-400 text-xs font-bold tracking-wider ml-2">
-                  NEURAL LINK ACTIVE
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
-
         {/* Additional Settings */}
         <View className="mb-8">
           <Text className={`text-xl font-semibold ${themeClasses.text} mb-4 ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
@@ -198,49 +214,44 @@ const SettingsView: React.FC = () => {
           </Text>
           
           <View className="space-y-3">
-            <TouchableOpacity 
+            <View 
               className={`p-4 rounded-xl ${themeClasses.surface} border ${themeClasses.border} ${themeMode === 'cyberpunk' ? 'border-cyan-400/30' : ''}`}
             >
               <View className="flex-row items-center justify-between">
-                <View className="flex-1">
+                <View className="flex-1 mr-4">
                   <Text className={`text-lg font-semibold ${themeClasses.text} ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
-                    {themeMode === 'cyberpunk' ? 'NOTIFICATIONS' : 'Notifications'}
+                    {themeMode === 'cyberpunk' ? 'TEST NOTIFICATIONS' : 'Test Notifications'}
                   </Text>
                   <Text className={`text-sm ${themeClasses.textSecondary} mt-1 ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
                     {themeMode === 'cyberpunk' 
-                      ? 'MANAGE YOUR NOTIFICATION PREFERENCES'
-                      : 'Manage your notification preferences'
+                      ? 'GET NOTIFIED ABOUT NEW TESTS AND RETESTS'
+                      : 'Get notified about new tests and retests'
                     }
                   </Text>
+                  {notificationStatus === 'permissions_required' && (
+                    <Text className={`text-xs ${themeMode === 'cyberpunk' ? 'text-yellow-400' : 'text-orange-500'} mt-1`}>
+                      Permissions required
+                    </Text>
+                  )}
+                  {notificationStatus === 'enabled' && (
+                    <Text className={`text-xs ${themeMode === 'cyberpunk' ? 'text-cyan-400' : 'text-green-500'} mt-1`}>
+                      Enabled
+                    </Text>
+                  )}
+                  {notificationStatus === 'disabled' && (
+                    <Text className={`text-xs ${themeClasses.textSecondary} mt-1`}>
+                      Disabled
+                    </Text>
+                  )}
                 </View>
-                <View className={`w-6 h-6 rounded-full ${themeMode === 'cyberpunk' 
-                  ? 'bg-cyan-400' 
-                  : 'bg-blue-500'
-                }`} />
+                <Switch
+                  value={notificationsEnabled}
+                  onValueChange={handleNotificationToggle}
+                  trackColor={{ false: '#767577', true: themeMode === 'cyberpunk' ? '#22d3ee' : '#3b82f6' }}
+                  thumbColor={notificationsEnabled ? '#ffffff' : '#f4f3f4'}
+                />
               </View>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              className={`p-4 rounded-xl ${themeClasses.surface} border ${themeClasses.border} ${themeMode === 'cyberpunk' ? 'border-cyan-400/30' : ''}`}
-            >
-              <View className="flex-row items-center justify-between">
-                <View className="flex-1">
-                  <Text className={`text-lg font-semibold ${themeClasses.text} ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
-                    {themeMode === 'cyberpunk' ? 'PRIVACY' : 'Privacy'}
-                  </Text>
-                  <Text className={`text-sm ${themeClasses.textSecondary} mt-1 ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
-                    {themeMode === 'cyberpunk' 
-                      ? 'CONTROL YOUR DATA AND PRIVACY SETTINGS'
-                      : 'Control your data and privacy settings'
-                    }
-                  </Text>
-                </View>
-                <View className={`w-6 h-6 rounded-full ${themeMode === 'cyberpunk' 
-                  ? 'bg-yellow-400' 
-                  : 'bg-green-500'
-                }`} />
-              </View>
-            </TouchableOpacity>
+            </View>
           </View>
         </View>
 

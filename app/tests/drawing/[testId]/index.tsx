@@ -26,6 +26,7 @@ import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
+import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
 
 // Function to decode JWT and extract student_id
 const getStudentIdFromToken = async (): Promise<string | null> => {
@@ -66,11 +67,16 @@ export default function DrawingTestScreen() {
   const [studentId, setStudentId] = useState<string | null>(null);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [isSubmittingToAPI, setIsSubmittingToAPI] = useState(false);
-
-  // Anti-cheating state
-  const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
-  const [caughtCheating, setCaughtCheating] = useState(false);
   const [timeElapsed, setTimeElapsed] = useState(0);
+
+  // Anti-cheating detection hook
+  const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
+  const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
+    studentId: studentId || '',
+    testType: 'drawing',
+    testId: testIdStr,
+    enabled: !!studentId && !!testId,
+  });
   
   // Timer refs to prevent re-initialization
   const timerInitializedRef = useRef<boolean>(false);
@@ -149,19 +155,6 @@ export default function DrawingTestScreen() {
     '#FFA500', // orange
   ];
 
-  // Anti-cheating: Track app state changes
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
-        setVisibilityChangeTimes(prev => prev + 1);
-        setCaughtCheating(true);
-        console.log('🚨 App went to background/inactive, visibility change count:', visibilityChangeTimes + 1);
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, [visibilityChangeTimes]);
 
   // Check if test is already completed (web app pattern)
   // IMPORTANT: Allow retests even if test is marked as completed
@@ -833,6 +826,8 @@ export default function DrawingTestScreen() {
       console.log('🌐 API Response:', response);
       
       if (response.data.success) {
+        // Clear anti-cheating keys on successful submission
+        await clearCheatingKeys();
         console.log('✅ Submission successful!');
         // Mark test as completed and clear retest keys (web app pattern)
         const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));

@@ -31,6 +31,14 @@ type Props = {
   value?: any;
   onChange: (questionId: string | number, value: any) => void;
   showCorrectAnswers?: boolean;
+  textInputProps?: {
+    contextMenuHidden?: boolean;
+    onFocus?: () => void;
+    textContentType?: 'none';
+    autoComplete?: 'off';
+    autoCorrect?: boolean;
+    spellCheck?: boolean;
+  };
 };
 
 export default function QuestionRenderer({
@@ -42,6 +50,7 @@ export default function QuestionRenderer({
   value,
   onChange,
   showCorrectAnswers = false,
+  textInputProps,
 }: Props) {
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);
@@ -109,7 +118,8 @@ export default function QuestionRenderer({
     onAnswerChange: onChange,
     showCorrectAnswers,
     studentId,
-  }), [question, testId, qtype, displayNumber, value, onChange, showCorrectAnswers, studentId]);
+    textInputProps,
+  }), [question, testId, qtype, displayNumber, value, onChange, showCorrectAnswers, studentId, textInputProps]);
 
   
   return (

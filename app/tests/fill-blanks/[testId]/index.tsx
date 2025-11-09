@@ -17,6 +17,7 @@ import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
+import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
 
 export default function FillBlanksTestScreen() {
   const { testId } = useLocalSearchParams();
@@ -68,6 +69,15 @@ export default function FillBlanksTestScreen() {
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [showResults, setShowResults] = useState(false);
   const [testResults, setTestResults] = useState<any>(null);
+
+  // Anti-cheating detection hook
+  const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
+  const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
+    studentId: user?.student_id || '',
+    testType: 'fill_blanks',
+    testId: testIdStr,
+    enabled: !!user?.student_id && !!testId,
+  });
 
   // Load user data from AsyncStorage if not in Redux
   useEffect(() => {
@@ -491,8 +501,8 @@ export default function FillBlanksTestScreen() {
         time_taken: 0,
         started_at: new Date().toISOString(),
         submitted_at: new Date().toISOString(),
-        caught_cheating: false,
-        visibility_change_times: 0,
+        caught_cheating: caughtCheating,
+        visibility_change_times: visibilityChangeTimes,
         answers_by_id: questions.reduce((acc, q, index) => {
           acc[q.question_id] = answers[index] || '';
           return acc;
@@ -505,6 +515,9 @@ export default function FillBlanksTestScreen() {
       const response = await api.post('/api/submit-fill-blanks-test', submissionData);
       
       if (response.data.success) {
+        // Clear anti-cheating keys on successful submission
+        await clearCheatingKeys();
+        
         // Mark test as completed and clear retest keys (web app pattern)
         const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
         await markTestCompleted(user.student_id, 'fill_blanks', testIdStr);

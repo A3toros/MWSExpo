@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // In-memory cache
 let tokenCache: string | null = null;
+let refreshTokenCache: string | null = null;
 let secureStoreAvailable: boolean | null = null;
 
 // Helper: Check if SecureStore is available
@@ -228,6 +229,155 @@ export const SecureToken = {
    */
   clearCache(): void {
     tokenCache = null;
+  }
+};
+
+// Refresh Token Storage (using same secure storage pattern)
+export const SecureRefreshToken = {
+  /**
+   * Set refresh token with retry, hash verification, and write verification
+   */
+  async set(token: string): Promise<boolean> {
+    const isSecureAvailable = await checkSecureStoreAvailability();
+    
+    // Fallback to AsyncStorage if SecureStore unavailable
+    if (!isSecureAvailable) {
+      if (__DEV__) {
+        console.warn('⚠️ SecureStore unavailable - using AsyncStorage for refresh token (less secure)');
+      }
+      try {
+        await AsyncStorage.setItem('refresh_token', token);
+        const verify = await AsyncStorage.getItem('refresh_token');
+        const ok = verify === token;
+        if (ok) refreshTokenCache = token; // Update cache
+        return ok;
+      } catch (e) {
+        console.error('AsyncStorage fallback failed for refresh token', e);
+        return false;
+      }
+    }
+    
+    // Normal SecureStore path with retry and hash
+    const ok = await retryWrite(() => storeWithHash('refresh_token', token));
+    
+    if (ok) {
+      // Update cache
+      refreshTokenCache = token;
+    }
+    
+    return ok;
+  },
+
+  /**
+   * Get refresh token with hash verification and cache
+   */
+  async get(): Promise<string | null> {
+    // Return cached value if available
+    if (refreshTokenCache) {
+      return refreshTokenCache;
+    }
+    
+    const isSecureAvailable = await checkSecureStoreAvailability();
+    
+    // Fallback to AsyncStorage if SecureStore unavailable
+    if (!isSecureAvailable) {
+      try {
+        // Try AsyncStorage first (for migration from old storage)
+        const token = await AsyncStorage.getItem('refresh_token');
+        if (token) {
+          refreshTokenCache = token; // Cache the value
+          return token;
+        }
+        return null;
+      } catch (e) {
+        console.error('AsyncStorage fallback read failed for refresh token', e);
+        return null;
+      }
+    }
+    
+    // Normal SecureStore path
+    try {
+      const token = await SecureStore.getItemAsync('refresh_token');
+      if (!token) {
+        // Try AsyncStorage for migration
+        const asyncToken = await AsyncStorage.getItem('refresh_token');
+        if (asyncToken) {
+          // Migrate to SecureStore
+          await this.set(asyncToken).catch(() => {});
+          refreshTokenCache = asyncToken;
+          return asyncToken;
+        }
+        refreshTokenCache = null;
+        return null;
+      }
+      
+      // Check if hash exists (new format) or token exists without hash (legacy format)
+      const storedHash = await SecureStore.getItemAsync('refresh_token_hash');
+      
+      if (storedHash) {
+        // New format: verify hash
+        const ok = await verifyHash('refresh_token');
+        if (!ok) {
+          refreshTokenCache = null; // Clear cache on verification failure
+          return null;
+        }
+      } else {
+        // Legacy format: token exists without hash - migrate it
+        if (__DEV__) {
+          console.log('Migrating legacy refresh token to secure storage format...');
+        }
+        try {
+          const hash = await hashValue(token);
+          await SecureStore.setItemAsync('refresh_token_hash', hash);
+          // Verify the hash was stored
+          const verify = await SecureStore.getItemAsync('refresh_token_hash');
+          if (verify !== hash) {
+            console.warn('Failed to store hash during refresh token migration');
+            return token; // Return token anyway, but without hash protection
+          }
+        } catch (e) {
+          console.warn('Failed to migrate refresh token hash:', e);
+          // Return token anyway, but without hash protection
+        }
+      }
+      
+      refreshTokenCache = token; // Cache the value
+      return token;
+    } catch (e) {
+      console.warn('Failed to get refresh token', e);
+      refreshTokenCache = null;
+      return null;
+    }
+  },
+
+  /**
+   * Clear refresh token from SecureStore, AsyncStorage fallback, and cache
+   */
+  async clear(): Promise<void> {
+    try {
+      // Clear SecureStore
+      await SecureStore.deleteItemAsync('refresh_token');
+      await SecureStore.deleteItemAsync('refresh_token_hash');
+    } catch (e) {
+      // Ignore if SecureStore unavailable
+    }
+    
+    try {
+      // Also clear AsyncStorage fallback
+      await AsyncStorage.removeItem('refresh_token');
+    } catch (e) {
+      // Ignore if AsyncStorage unavailable
+    }
+    
+    // Clear in-memory cache
+    refreshTokenCache = null;
+  },
+
+  /**
+   * Clear cache manually if needed
+   */
+  clearCache(): void {
+    refreshTokenCache = null;
   }
 };
 

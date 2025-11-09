@@ -16,6 +16,7 @@ import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 import MathText from '../../../../src/components/math/MathText';
+import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
 
 export default function TrueFalseTestScreen() {
   const { testId } = useLocalSearchParams();
@@ -37,8 +38,15 @@ export default function TrueFalseTestScreen() {
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [showResults, setShowResults] = useState(false);
   const [testResults, setTestResults] = useState<any>(null);
-  const [visibilityChangeTimes, setVisibilityChangeTimes] = useState(0);
-  const [caughtCheating, setCaughtCheating] = useState(false);
+
+  // Anti-cheating detection hook
+  const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
+  const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
+    studentId: user?.student_id || '',
+    testType: 'true_false',
+    testId: testIdStr,
+    enabled: !!user?.student_id && !!testId,
+  });
 
   // Load user data from AsyncStorage if not in Redux
   useEffect(() => {
@@ -235,125 +243,6 @@ export default function TrueFalseTestScreen() {
     loadTestData();
   }, [loadTestData]);
 
-  // Anti-cheating tracking (like web app)
-  useEffect(() => {
-    const loadAntiCheatingData = async () => {
-      try {
-        const storageKey = `anti_cheating_true_false_${testId}`;
-        const data = await AsyncStorage.getItem(storageKey);
-        if (data) {
-          const parsed = JSON.parse(data);
-          setVisibilityChangeTimes(parsed.visibility_change_times || 0);
-          setCaughtCheating(parsed.caught_cheating || false);
-        }
-      } catch (e) {
-        console.log('Error loading anti-cheating data:', e);
-      }
-    };
-
-    if (testId) {
-      loadAntiCheatingData();
-    }
-  }, [testId]);
-
-  // Track app state changes for anti-cheating
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
-        // App went to background - increment visibility change count
-        setVisibilityChangeTimes(prev => {
-          const newCount = prev + 1;
-          // Save to AsyncStorage
-          const storageKey = `anti_cheating_true_false_${testId}`;
-          AsyncStorage.setItem(storageKey, JSON.stringify({
-            visibility_change_times: newCount,
-            caught_cheating: newCount >= 2, // 2+ changes = cheating
-            last_updated: new Date().toISOString()
-          }));
-          
-          // Mark as cheating if 2+ changes
-          if (newCount >= 2) {
-            setCaughtCheating(true);
-          }
-          
-          return newCount;
-        });
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, [testId]);
-
-  // Timer effect - only start if test has timer enabled
-  useEffect(() => {
-    if (!testData || !questions.length || !user?.student_id) return;
-    
-    // Only start timer if test has a time limit set
-    const allowedTime = testData.allowed_time || testData.time_limit;
-    if (allowedTime && allowedTime > 0) {
-      const timerKey = `test_timer_${user.student_id}_true_false_${testId}`;
-      
-      // Load cached timer state
-      const loadTimerState = async () => {
-        try {
-          const cached = await AsyncStorage.getItem(timerKey);
-          const now = Date.now();
-          if (cached) {
-            const parsed = JSON.parse(cached);
-            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
-            const remaining = Math.max(0, Number(parsed.remainingSeconds || allowedTime) - Math.max(0, drift));
-            setTimeElapsed(allowedTime - remaining);
-            return remaining;
-          } else {
-            // Initialize new timer
-            await AsyncStorage.setItem(timerKey, JSON.stringify({
-              remainingSeconds: allowedTime,
-              lastTickAt: new Date(now).toISOString(),
-              startedAt: new Date(now).toISOString()
-            }));
-            return allowedTime;
-          }
-        } catch (e) {
-          console.error('Timer cache init error:', e);
-          return allowedTime;
-        }
-      };
-
-      let remainingTime = allowedTime;
-      loadTimerState().then(remaining => {
-        remainingTime = remaining;
-      });
-
-      const timer = setInterval(async () => {
-        remainingTime -= 1;
-        setTimeElapsed(allowedTime - remainingTime);
-        
-        // Save timer state
-        try {
-          await AsyncStorage.setItem(timerKey, JSON.stringify({
-            remainingSeconds: remainingTime,
-            lastTickAt: new Date().toISOString(),
-            startedAt: new Date().toISOString()
-          }));
-        } catch (e) {
-          console.error('Timer save error:', e);
-        }
-        
-        // Auto-submit when time runs out - no popup, direct submission
-        if (remainingTime <= 0) {
-          clearInterval(timer);
-          // Directly submit without any confirmation
-          submitTest();
-        }
-      }, 1000);
-
-      return () => {
-        clearInterval(timer);
-      };
-    }
-    // If no timer, don't start anything
-  }, [testData, questions.length, user?.student_id, submitTest]);
 
   // Handle answer change
   const handleAnswerChange = useCallback((questionId: string | number, answer: any) => {
@@ -468,6 +357,9 @@ export default function TrueFalseTestScreen() {
       const response = await api.post('/api/submit-true-false-test', submissionData);
       
       if (response.data.success) {
+        // Clear anti-cheating keys on successful submission
+        await clearCheatingKeys();
+        
         // Mark test as completed and clear retest keys (web app pattern)
         const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
         await markTestCompleted(user.student_id, 'true_false', testIdStr);
@@ -512,7 +404,77 @@ export default function TrueFalseTestScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [user?.student_id, testData, questions, answers, testId]);
+  }, [user?.student_id, testData, questions, answers, testId, isLoadingUser, caughtCheating, visibilityChangeTimes, clearCheatingKeys]);
+
+  // Timer effect - only start if test has timer enabled
+  useEffect(() => {
+    if (!testData || !questions.length || !user?.student_id) return;
+    
+    // Only start timer if test has a time limit set
+    const allowedTime = testData.allowed_time || testData.time_limit;
+    if (allowedTime && allowedTime > 0) {
+      const timerKey = `test_timer_${user.student_id}_true_false_${testId}`;
+      
+      // Load cached timer state
+      const loadTimerState = async () => {
+        try {
+          const cached = await AsyncStorage.getItem(timerKey);
+          const now = Date.now();
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
+            const remaining = Math.max(0, Number(parsed.remainingSeconds || allowedTime) - Math.max(0, drift));
+            setTimeElapsed(allowedTime - remaining);
+            return remaining;
+          } else {
+            // Initialize new timer
+            await AsyncStorage.setItem(timerKey, JSON.stringify({
+              remainingSeconds: allowedTime,
+              lastTickAt: new Date(now).toISOString(),
+              startedAt: new Date(now).toISOString()
+            }));
+            return allowedTime;
+          }
+        } catch (e) {
+          console.error('Timer cache init error:', e);
+          return allowedTime;
+        }
+      };
+
+      let remainingTime = allowedTime;
+      loadTimerState().then(remaining => {
+        remainingTime = remaining;
+      });
+
+      const timer = setInterval(async () => {
+        remainingTime -= 1;
+        setTimeElapsed(allowedTime - remainingTime);
+        
+        // Save timer state
+        try {
+          await AsyncStorage.setItem(timerKey, JSON.stringify({
+            remainingSeconds: remainingTime,
+            lastTickAt: new Date().toISOString(),
+            startedAt: new Date().toISOString()
+          }));
+        } catch (e) {
+          console.error('Timer save error:', e);
+        }
+        
+        // Auto-submit when time runs out - no popup, direct submission
+        if (remainingTime <= 0) {
+          clearInterval(timer);
+          // Directly submit without any confirmation
+          submitTest();
+        }
+      }, 1000);
+
+      return () => {
+        clearInterval(timer);
+      };
+    }
+    // If no timer, don't start anything
+  }, [testData, questions.length, user?.student_id, submitTest]);
 
   if (loading) {
     return (

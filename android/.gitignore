@@ -14,3 +14,10 @@ local.properties
 
 # Bundle artifacts
 *.jsbundle
+
+# Keystore files and signing credentials
+*.keystore
+*.jks
+keystore.properties
+gradle.properties
+gradle.properties.local
