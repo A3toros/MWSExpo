@@ -1,5 +1,24 @@
 # Retest Filtering Fix Plan
 
+## Web App Filtering Logic (Reference)
+
+**Backend** (`functions/get-student-active-tests.js` lines 210-213):
+```javascript
+// Skip if completed AND no retest available
+if (isCompleted && !retestAvailable) {
+  continue; // Skip this test
+}
+```
+
+**Frontend** (`src/student/StudentCabinet.jsx` line 440):
+```javascript
+if (completedTests.has(testKey) && !test?.retest_available) {
+  return; // Block starting test
+}
+```
+
+**Web app rule**: Show test if `retest_available = true`, regardless of completion status.
+
 ## Problem
 
 When a retest is submitted and marked as completed:
@@ -12,6 +31,23 @@ When a retest is submitted and marked as completed:
 ## Root Cause
 
 `processRetestAvailability` only checks API data (`retest_attempts_left`) to determine if it should clear completion. It doesn't check the local metadata that `markTestCompleted` sets when a retest is completed.
+
+## How Web App Handles This
+
+The web app uses the **same approach** - it checks local attempt tracking:
+
+1. **`checkTestCompleted` function** (lines 331-356):
+   - When `retestAvailable = true`, checks localStorage attempt keys (`retest_attempt1_`, `retest_attempt2_`, etc.)
+   - Counts attempts: `currentAttempts = attemptKeys.length`
+   - Compares with `maxAttempts` from test data
+   - If `currentAttempts >= maxAttempts` → returns `true` (completed)
+
+2. **Button rendering** (lines 906-925):
+   - Checks `retest_attempts_${studentId}_${testType}_${testId}` metadata
+   - If `meta.used >= meta.max` → shows "✓ Completed" (disabled) instead of "Start Retest"
+   - Even when API says `retest_available = true`
+
+**Web app rule**: Use local attempt tracking/metadata to determine if retest is actually completed, regardless of API `retest_available` flag.
 
 ## Solution
 

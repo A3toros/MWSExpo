@@ -169,6 +169,9 @@ export function TermsOfServiceModal({
                 The MWS Student App is an educational learning management system designed for
                 Mathayomwatsing School students. The app enables students to take tests, view
                 results, track progress, and access educational content.
+                {'\n\n'}
+                This application was created by Aleksandr Petrov and is not officially endorsed or
+                affiliated with Mathayomwatsing School, its administration, faculty, or staff.
               </Text>
             </View>
 
@@ -235,7 +238,8 @@ export function TermsOfServiceModal({
                   }`}
                 >
                   • <Text className="font-semibold">Test Data:</Text> Test answers, scores,
-                  completion status, and progress for academic assessment
+                  completion status, progress, time spent on tests, start and submission
+                  timestamps, and academic period information for academic assessment
                 </Text>
                 <Text
                   className={`text-base leading-6 ${
@@ -246,8 +250,22 @@ export function TermsOfServiceModal({
                       : 'text-gray-700'
                   }`}
                 >
-                  • <Text className="font-semibold">Usage Data:</Text> App interactions,
-                  feature usage, and performance metrics to improve the app experience
+                  • <Text className="font-semibold">Anti-Cheating Data:</Text> App visibility
+                  changes (when the app goes to background/foreground) and cheating detection
+                  flags to ensure academic integrity during tests
+                </Text>
+                <Text
+                  className={`text-base leading-6 ${
+                    isCyberpunk
+                      ? 'text-cyan-300'
+                      : isDark
+                      ? 'text-slate-300'
+                      : 'text-gray-700'
+                  }`}
+                >
+                  • <Text className="font-semibold">Speaking Test Data:</Text> Audio recordings,
+                  transcripts, and AI-generated analysis scores (grammar, vocabulary,
+                  pronunciation, fluency, content) for speaking test assessments
                 </Text>
               </View>
               <View
@@ -336,7 +354,7 @@ export function TermsOfServiceModal({
                       : 'text-gray-700'
                   }`}
                 >
-                  • Improve app functionality and user experience
+                  • Process and evaluate speaking test audio recordings
                 </Text>
                 <Text
                   className={`text-base leading-6 ${
