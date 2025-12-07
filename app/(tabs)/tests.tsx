@@ -103,14 +103,20 @@ export default function TestsScreen() {
       <FlatList
         data={tests}
         keyExtractor={(item, idx) => String(item.test_id ?? idx)}
-        renderItem={({ item }) => (
-          <Link href={`/tests/${item.test_id}?type=${encodeURIComponent(item.test_type)}`} asChild>
+        renderItem={({ item }) => {
+          const href =
+            item.test_type === 'exam'
+              ? `/exam/${item.test_id}`
+              : `/tests/${item.test_id}?type=${encodeURIComponent(item.test_type)}`;
+          return (
+            <Link href={href as any} asChild>
             <TouchableOpacity className="bg-white mx-4 mb-3 p-4 rounded-lg shadow-sm border border-gray-200" accessibilityRole="button" activeOpacity={0.7}>
               <Text className="text-lg font-semibold text-gray-800 mb-2">{item.test_name}</Text>
               <Text className="text-base text-gray-600">{item.test_type} • {item.teacher_name}</Text>
             </TouchableOpacity>
-          </Link>
-        )}
+            </Link>
+          );
+        }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { 
           console.log('=== TESTS TAB REFRESH TRIGGERED ===');
           console.log('Tests tab: Pull to refresh activated at:', new Date().toISOString());

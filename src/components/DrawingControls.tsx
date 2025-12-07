@@ -1,6 +1,7 @@
 /** @jsxImportSource nativewind */
 import React from 'react';
 import { View, TouchableOpacity, Text as RNText, Image } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface DrawingControlsProps {
@@ -9,6 +10,7 @@ interface DrawingControlsProps {
   onReset: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onFullscreenRequest?: () => void;
   canUndo: boolean;
   canRedo: boolean;
   zoomLevel: number;
@@ -20,6 +22,7 @@ export default function DrawingControls({
   onReset,
   onZoomIn,
   onZoomOut,
+  onFullscreenRequest,
   canUndo,
   canRedo,
   zoomLevel
@@ -116,6 +119,27 @@ export default function DrawingControls({
       >
         <Image source={require('../../assets/images/canvas/zoom-out.png')} className="w-4 h-4" />
       </TouchableOpacity>
+      
+      {onFullscreenRequest && (
+        <TouchableOpacity 
+          className={`p-1 rounded ${
+            themeMode === 'cyberpunk' 
+              ? 'border border-cyan-400' 
+              : themeMode === 'dark' 
+              ? 'bg-gray-700 border border-gray-600' 
+              : 'bg-white border border-gray-300'
+          }`}
+          style={themeMode === 'cyberpunk' ? { backgroundColor: '#f8ef02' } : {}}
+          onPress={onFullscreenRequest}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <MaterialCommunityIcons 
+            name="fullscreen" 
+            size={16} 
+            color={themeMode === 'cyberpunk' ? '#000000' : themeMode === 'dark' ? '#e2e8f0' : '#374151'} 
+          />
+        </TouchableOpacity>
+      )}
       
       <RNText className={`text-xs ml-2 ${
         themeMode === 'cyberpunk' 

@@ -42,9 +42,6 @@ export function useAndroidBackButton(
 
     // Cleanup: remove listener when component unmounts or enabled changes
     return () => {
-      if (__DEV__) {
-        console.log('[useAndroidBackButton] Removing back button listener');
-      }
       backHandler.remove();
     };
   }, [enabled, onBackPress]);

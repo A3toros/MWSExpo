@@ -1,4 +1,10 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './apiClient';
+
+const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB base64 chunk size (matches web)
+const MAX_BASE64_SIZE = 12 * 1024 * 1024; // ~12MB hard limit
+const MAX_RETRIES = 3;
+const RETRY_BACKOFF_MS = 1000;
 
 export interface AIAnalysis {
   transcript: string;
@@ -55,56 +61,54 @@ export class AIProcessingService {
   }
 
   /**
-   * Process audio with AI (like web app)
+   * Process audio with AI (like web app) with chunked transcription and better errors
    */
-  static async processAudioWithAI(audioBase64: string, testId: string, questionId: string = '1', retryCount: number = 0): Promise<AIAnalysis> {
+  static async processAudioWithAI(
+    audioBase64: string,
+    testId: string,
+    questionId: string = '1',
+    audioMimeType: string = 'audio/m4a',
+    audioHash?: string,
+    retryCount: number = 0
+  ): Promise<AIAnalysis> {
     try {
-      console.log('🎤 Processing audio with AI...', { testId, questionId, audioSize: audioBase64.length, retryCount });
-      
-      const requestData = {
-        test_id: testId,
-        question_id: questionId,
-        audio_blob: audioBase64,
-      };
-      
-      console.log('🎤 Request data size:', JSON.stringify(requestData).length);
-      console.log('🎤 Audio blob size:', audioBase64.length);
-      console.log('🎤 Audio format: WebM with AAC (Android compatible)');
-      console.log('🎤 Base URL:', api.defaults.baseURL);
-      console.log('🎤 Full URL:', `${api.defaults.baseURL}/.netlify/functions/process-speaking-audio-ai`);
-      
-      // Check if audio blob is too large
-      if (audioBase64.length > 10 * 1024 * 1024) { // 10MB limit
+      console.log('🎤 Processing audio with AI (two-stage: transcribe -> analyze)...', { testId, questionId, audioSize: audioBase64.length, retryCount });
+
+      if (audioBase64.length > MAX_BASE64_SIZE) {
         throw new Error('Audio file is too large. Please record a shorter audio clip.');
       }
-      
-      const response = await api.post('/.netlify/functions/process-speaking-audio-ai', requestData, {
-        timeout: 60000, // 60 second timeout
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      console.log('🎤 Response headers:', response.headers);
 
-      console.log('🎤 AI Processing response status:', response.status);
-      console.log('🎤 AI Processing response data:', response.data);
-
-      if (!response.data || !response.data.success) {
-        const errorMessage = response.data?.error || response.data?.message || 'AI processing failed';
-        console.error('🎤 AI Processing failed:', errorMessage);
-        throw new Error(errorMessage);
+      // Stage 1: Transcription (chunked like web)
+      const transcript = await this.transcribeAudio(audioBase64, audioMimeType, testId, questionId, audioHash);
+      if (!transcript.trim()) {
+        throw new Error('Your speech was not recognized, please speak louder and try again.');
       }
 
-      // Map the AI response to our interface
-      const aiResponse = response.data;
+      // Stage 2: Analysis using transcript (matches web flow)
+      const analyzeResp = await this.requestWithRetry(
+        '/.netlify/functions/analyze-speaking-transcript',
+        {
+          transcript,
+          test_id: testId,
+          question_id: questionId,
+        },
+        45000,
+      );
+
+      const analyzeData = analyzeResp?.data;
+      if (!analyzeData?.success) {
+        const msg = analyzeData?.error || analyzeData?.message || 'Analysis failed. Please try again.';
+        throw new Error(msg);
+      }
+
+      const aiResponse = analyzeData;
       const analysis: AIAnalysis = {
-        transcript: aiResponse.transcript || '',
+        transcript,
         word_count: aiResponse.word_count || 0,
         overall_score: aiResponse.overall_score || 0,
         grammar_score: aiResponse.grammar_score || 0,
         vocabulary_score: aiResponse.vocabulary_score || 0,
-        pronunciation_score: aiResponse.pronunciation_score || 0,
+        pronunciation_score: aiResponse.pronunciation_score || 0, // may be missing, default 0
         fluency_score: aiResponse.fluency_score || 0,
         content_score: aiResponse.content_score || 0,
         grammar_mistakes: aiResponse.grammar_mistakes || 0,
@@ -121,24 +125,21 @@ export class AIProcessingService {
         suggestions: aiResponse.suggestions || [],
       };
 
-      console.log('🎤 Mapped AI analysis:', analysis);
+      console.log('🎤 Mapped AI analysis (two-stage):', analysis);
       return analysis;
     } catch (error: any) {
       console.error('Failed to process audio with AI:', error);
-      
-      if (error.response) {
-        // Server responded with error status
-        console.error('🎤 Server error response:', error.response.status, error.response.data);
-        throw new Error(`Server error: ${error.response.status} - ${error.response.data?.message || 'Unknown server error'}`);
-      } else if (error.request) {
-        // Request was made but no response received
-        console.error('🎤 No response received:', error.request);
-        throw new Error('No response from server. Please check your internet connection.');
-      } else {
-        // Something else happened
-        console.error('🎤 Request setup error:', error.message);
-        throw new Error(`Request failed: ${error.message}`);
+      const status = error?.response?.status;
+      if (status >= 500) {
+        throw new Error('AI service is temporarily unavailable. Please try again.');
       }
+      if (error.code === 'ECONNABORTED') {
+        throw new Error('Request timed out. Please check your connection and try again.');
+      }
+      if (error.request) {
+        throw new Error('No response from server. Please check your internet connection.');
+      }
+      throw new Error(error?.message || 'Failed to process audio');
     }
   }
 
@@ -210,12 +211,17 @@ export class AIProcessingService {
       console.log('🎤 Converting audio to base64...');
       const audioBase64 = await this.convertAudioToBase64(audioUri);
       console.log('🎤 Audio converted, size:', audioBase64.length);
+    const audioMimeType = this.getMimeFromUri(audioUri);
+    const audioHash = this.generateAudioHash(audioBase64);
 
       // Step 2: Process with AI
       onProgress?.({ step: 'transcribing', progress: 50 });
       console.log('🎤 Processing with AI...');
-      const analysis = await this.processAudioWithAI(audioBase64, testId, questionId);
+    const analysis = await this.processAudioWithAI(audioBase64, testId, questionId, audioMimeType, audioHash);
       console.log('🎤 AI processing complete:', analysis);
+
+      // Clear cached failed payload on success
+      await this.clearFailedPayload(studentId, testId, questionId);
 
       // Step 3: Complete
       onProgress?.({ step: 'complete', progress: 100 });
@@ -223,12 +229,240 @@ export class AIProcessingService {
       return analysis;
     } catch (error) {
       console.error('Complete workflow error:', error);
+      // Cache payload for retry (parity with web keeping last attempt)
+      try {
+        await this.cacheFailedPayload(studentId, testId, questionId, {
+          audio_base64: await this.safeConvertToBase64(audioUri),
+          audio_mime_type: this.getMimeFromUri(audioUri),
+          test_id: testId,
+          question_id: questionId,
+          audio_hash: this.generateAudioHash(await this.safeConvertToBase64(audioUri)),
+        });
+      } catch (cacheErr) {
+        console.error('Failed to cache failed payload:', cacheErr);
+      }
       throw error;
     }
   }
 
+  /**
+   * Derive mime type from uri
+   */
+  private static getMimeFromUri(uri: string | null): string {
+    if (!uri) return 'audio/m4a';
+    const lower = uri.toLowerCase();
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    if (lower.endsWith('.mp3')) return 'audio/mpeg';
+    if (lower.endsWith('.m4a')) return 'audio/m4a';
+    if (lower.endsWith('.aac')) return 'audio/aac';
+    return 'audio/m4a';
+  }
+
+  /**
+   * Save failed payload for retry/debug (web parity)
+   */
+  private static async cacheFailedPayload(
+    studentId: string,
+    testId: string,
+    questionId: string,
+    payload: any
+  ) {
+    const key = this.getFailedPayloadKey(studentId, testId, questionId);
+    const value = JSON.stringify({ payload, timestamp: Date.now() });
+    await AsyncStorage.setItem(key, value);
+  }
+
+  private static async clearFailedPayload(
+    studentId: string,
+    testId: string,
+    questionId: string
+  ) {
+    const key = this.getFailedPayloadKey(studentId, testId, questionId);
+    await AsyncStorage.removeItem(key);
+  }
+
+  private static getFailedPayloadKey(studentId: string, testId: string, questionId: string) {
+    return `speaking_failed_payload_${studentId || 'unknown'}_${testId}_${questionId}`;
+  }
+
+  /**
+   * Lightweight audio hash (first 1000 chars) for backend caching parity with web
+   */
+  private static generateAudioHash(base64Audio: string | null): string {
+    if (!base64Audio) return '';
+    const sample = base64Audio.slice(0, 1000);
+    let hash = 0;
+    for (let i = 0; i < sample.length; i++) {
+      const char = sample.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash |= 0; // to 32-bit
+    }
+    return Math.abs(hash).toString(16);
+  }
+
+  /**
+   * Transcribe audio with chunked upload, mirroring web app behavior
+   */
+  private static async transcribeAudio(
+    audioBase64: string,
+    audioMimeType: string,
+    testId: string,
+    questionId: string,
+    audioHash?: string
+  ): Promise<string> {
+    const single = async (useDataUrl: boolean) => {
+      const body = {
+        test_id: testId,
+        question_id: questionId,
+        audio_blob: useDataUrl ? `data:${audioMimeType};base64,${audioBase64}` : audioBase64,
+        audio_mime_type: audioMimeType,
+        audio_hash: audioHash,
+      };
+      const resp = await this.requestWithRetry('/.netlify/functions/transcribe-speaking-audio', body, 60000);
+      const data = resp?.data;
+      if (!data?.success) {
+        const msg = data?.error || data?.message || 'Transcription failed. Please speak louder and try again.';
+        throw new Error(msg);
+      }
+      return data.transcript as string;
+    };
+
+    if (audioBase64.length <= CHUNK_SIZE) {
+      try {
+        return await single(false);
+      } catch (err: any) {
+        console.error('🎤 Transcription failed (raw base64), retrying with data URL prefix', err?.response?.data || err?.message);
+        return single(true);
+      }
+    }
+
+    const chunks: string[] = [];
+    for (let i = 0; i < audioBase64.length; i += CHUNK_SIZE) {
+      chunks.push(audioBase64.slice(i, i + CHUNK_SIZE));
+    }
+
+    let responseData: any = null;
+    for (let i = 0; i < chunks.length; i++) {
+      const body = {
+        test_id: testId,
+        question_id: questionId,
+        audio_blob: chunks[i],
+        audio_mime_type: audioMimeType,
+        chunk_index: i,
+        total_chunks: chunks.length,
+        is_chunked: true,
+        audio_hash: audioHash,
+      };
+      const resp = await this.requestWithRetry('/.netlify/functions/transcribe-speaking-audio', body, 60000);
+      responseData = resp?.data;
+      if (i < chunks.length - 1) {
+        if (!responseData?.success || !responseData?.chunk_received) {
+          throw new Error(responseData?.error || responseData?.message || `Failed to upload chunk ${i + 1}`);
+        }
+      }
+    }
+
+    if (!responseData?.success) {
+      const msg = responseData?.error || responseData?.message || 'Transcription failed. Please try again.';
+      throw new Error(msg);
+    }
+    return responseData.transcript as string;
+  }
+
+  /**
+   * Simple retry wrapper to mirror web makeRequestWithRetry behavior
+   */
+  private static async requestWithRetry(
+    url: string,
+    body: any,
+    timeout: number = 60000,
+    attempts: number = MAX_RETRIES
+  ) {
+    let lastError: any;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await api.post(url, body, {
+          timeout,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err: any) {
+        lastError = err;
+        const status = err?.response?.status;
+        const retriable = status >= 500 || err?.code === 'ECONNABORTED' || err?.request;
+        if (i < attempts - 1 && retriable) {
+          const backoff = RETRY_BACKOFF_MS * (i + 1);
+          console.warn(`Request failed (attempt ${i + 1}/${attempts}), retrying in ${backoff}ms`, err?.response?.data || err?.message);
+          await this.sleep(backoff);
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError;
+  }
+
+  private static sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Safe convert with guard for caching fallback
+   */
+  private static async safeConvertToBase64(audioUri: string): Promise<string> {
+    try {
+      return await this.convertAudioToBase64(audioUri);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Load cached failed payload for resend/retry
+   */
+  static async getCachedFailedPayload(
+    studentId: string,
+    testId: string,
+    questionId: string
+  ): Promise<any | null> {
+    const key = this.getFailedPayloadKey(studentId, testId, questionId);
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Retry processing using cached payload (web parity for resend)
+   */
+  static async retryCachedPayload(
+    studentId: string,
+    testId: string,
+    questionId: string,
+    onProgress?: (progress: ProcessingProgress) => void
+  ): Promise<AIAnalysis> {
+    const cached = await this.getCachedFailedPayload(studentId, testId, questionId);
+    const payload = cached?.payload;
+    if (!payload?.audio_base64) {
+      throw new Error('No cached attempt available to resend. Please re-record.');
+    }
+    const audioBase64 = payload.audio_base64 as string;
+    const audioMimeType = payload.audio_mime_type || 'audio/m4a';
+    const audioHash = payload.audio_hash;
+
+    onProgress?.({ step: 'uploading', progress: 20 });
+    const analysis = await this.processAudioWithAI(
+      audioBase64,
+      testId,
+      questionId,
+      audioMimeType,
+      audioHash
+    );
+    onProgress?.({ step: 'complete', progress: 100 });
+    return analysis;
+  }
 }
 
 export default AIProcessingService;
-
-

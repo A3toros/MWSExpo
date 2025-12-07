@@ -204,23 +204,36 @@ export default function AudioRecorderNew({
 
   const stopRecording = async () => {
     if (disabled) return;
+    if (!state.isRecording) {
+      // Avoid throwing when a duplicate stop is triggered
+      console.warn('🎤 Stop requested but not currently recording');
+      return;
+    }
     
     try {
-      const uri = await recordingManager.stopRecording();
+      const { uri, durationMillis } = await recordingManager.stopRecording();
+      const actualSeconds = durationMillis ? Math.round(durationMillis / 1000) : state.duration;
       
-      // Check minimum duration
-      if (state.duration < minDuration) {
+      // Check minimum duration using actual recorded length
+      if (actualSeconds < minDuration) {
+        setState(prev => ({ 
+          ...prev, 
+          isRecording: false, 
+          duration: actualSeconds 
+        }));
+        stopTimer();
         handleError(`Recording must be at least ${minDuration} seconds long`);
         return;
       }
       
       setState(prev => ({ 
         ...prev, 
-        isRecording: false 
+        isRecording: false,
+        duration: actualSeconds
       }));
       
       stopTimer();
-      onRecordingStop(uri, state.duration);
+      onRecordingStop(uri, actualSeconds);
       console.log('🎤 Recording stopped successfully');
       
     } catch (error) {

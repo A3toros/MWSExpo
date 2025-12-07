@@ -1,6 +1,6 @@
 /** @jsxImportSource nativewind */
 import { useLocalSearchParams, router } from 'expo-router';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity, ScrollView, Alert, Image, Dimensions, AppState } from 'react-native';
 import Svg, { Line, Polygon, G, Circle } from 'react-native-svg';
 import { DraxProvider, DraxView } from 'react-native-drax';
@@ -8,6 +8,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, getSubmissionMethod } from '../../../../src/services/apiClient';
 import { useAppSelector } from '../../../../src/store';
 import TestHeader from '../../../../src/components/TestHeader';
+import ExamTestHeader from '../../../../src/components/ExamTestHeader';
+import { useExamTimer } from '../../../../src/hooks/useExamTimer';
 import { SubmitModal } from '../../../../src/components/modals';
 import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
@@ -16,11 +18,16 @@ import ProgressTracker from '../../../../src/components/ProgressTracker';
 import { academicCalendarService } from '../../../../src/services/AcademicCalendarService';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
+import { useExamNavigation } from '../../../../src/hooks/useExamNavigation';
+import ExamNavFooter from '../../../../src/components/ExamNavFooter';
 
 // Using Drax for drag and drop; no custom gesture math needed
 
 export default function MatchingTestScreen() {
-  const { testId } = useLocalSearchParams<{ testId: string }>();
+  const { testId, exam, examId } = useLocalSearchParams<{ testId: string; exam?: string; examId?: string }>();
+  const inExamContext = useMemo(() => exam === '1' && !!examId, [exam, examId]);
+  const submitAllowed = !inExamContext;
+  const showExamNav = inExamContext && !!examId;
   const user = useAppSelector((state) => state.auth.user);
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);
@@ -44,14 +51,59 @@ export default function MatchingTestScreen() {
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [studentId, setStudentId] = useState<string | null>(null);
 
+  // Prefill placedWords/arrows from cached exam data when in exam context
+  useEffect(() => {
+    if (!showExamNav || !studentId || !examId || !testId) return;
+    const key = `exam_answer_${studentId}_${examId}_${testId}_matching_type`;
+    const preloaded = cachedAnswers?.[key];
+    if (preloaded) {
+      if (preloaded.placedWords) setPlacedWords(preloaded.placedWords);
+      if (preloaded.placedWordsHistory) setPlacedWordsHistory(preloaded.placedWordsHistory);
+      if (preloaded.arrows) setArrows(preloaded.arrows);
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.placedWords) setPlacedWords(parsed.placedWords);
+          if (parsed?.placedWordsHistory) setPlacedWordsHistory(parsed.placedWordsHistory);
+          if (parsed?.arrows) setArrows(parsed.arrows);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [showExamNav, studentId, examId, testId, cachedAnswers]);
+
   // Anti-cheating detection hook
   const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
   const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
     studentId: studentId || '',
     testType: 'matching_type',
     testId: testIdStr,
-    enabled: !!studentId && !!testId,
+    enabled: !!studentId && !!testId && !inExamContext,
   });
+
+  const {
+    loading: navLoading,
+    currentIndex: examTestIndex,
+    total: examTestsTotal,
+    navigatePrev,
+    navigateNext,
+    navigateReview,
+    examName,
+    totalMinutes,
+    cachedAnswers,
+  } = useExamNavigation({
+    examId,
+    currentTestId: testId,
+    currentTestType: 'matching_type',
+    enabled: showExamNav,
+    studentId,
+  });
+  const examTimeRemaining = useExamTimer({ examId, studentId, totalMinutes });
   
   // Timer refs to prevent re-initialization
   const timerInitializedRef = useRef<boolean>(false);
@@ -332,6 +384,14 @@ export default function MatchingTestScreen() {
     }
   }, [testId, checkTestCompleted]);
 
+  // Persist answers into exam-level key when in exam context
+  useEffect(() => {
+    if (!inExamContext || !studentId || !examId || !testId) return;
+    const payload = { placedWords, arrows };
+    const key = `exam_answer_${studentId}_${examId}_${testId}_matching_type`;
+    AsyncStorage.setItem(key, JSON.stringify(payload)).catch(() => {});
+  }, [arrows, examId, inExamContext, placedWords, studentId, testId]);
+
   // Handle word placement - match web app logic
   const handleWordPlacement = useCallback((wordId: string | number, blockId: string | number) => {
     const key = String(blockId);
@@ -550,8 +610,8 @@ export default function MatchingTestScreen() {
 
   // Store performSubmit in ref to avoid dependency issues
   useEffect(() => {
-    performSubmitRef.current = performSubmit;
-  }, [performSubmit]);
+    performSubmitRef.current = submitAllowed ? performSubmit : undefined;
+  }, [performSubmit, submitAllowed]);
 
   // Extract student ID once on mount
   useEffect(() => {
@@ -626,6 +686,7 @@ export default function MatchingTestScreen() {
       timerInitialized: timerInitializedRef.current 
     });
     
+    if (!submitAllowed) return;
     if (allowedTime && allowedTime > 0) {
       // Prevent multiple timer initializations
       if (timerInitializedRef.current) {
@@ -1237,9 +1298,24 @@ export default function MatchingTestScreen() {
 
   return (
     <View className={`flex-1 ${themeClasses.background}`}>
-      <TestHeader 
-        testName={testData.test_name}
-      />
+      {showExamNav ? (
+        <ExamTestHeader
+          themeMode={themeMode}
+          examId={examId}
+          examName={examName || 'Exam'}
+          testName={testData?.test_name || 'Matching Test'}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          timeSeconds={examTimeRemaining}
+          onBack={() => router.back()}
+        />
+      ) : (
+        <TestHeader 
+          testName={testData.test_name}
+          onExit={() => router.back()}
+          showBackButton
+        />
+      )}
       <ScrollView className="flex-1">
         <Text className="text-base text-gray-600 text-center px-4 py-4">Drag words to the correct blocks on the image</Text>
 
@@ -1249,9 +1325,9 @@ export default function MatchingTestScreen() {
           totalQuestions={blocks.length}
           percentage={blocks.length > 0 ? Math.round((Object.keys(placedWords).length / blocks.length) * 100) : 0}
           timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
-          onSubmitTest={submitTest}
-          isSubmitting={isSubmitting}
-          canSubmit={isAllPlaced}
+          onSubmitTest={submitAllowed ? submitTest : undefined}
+          isSubmitting={submitAllowed ? isSubmitting : false}
+          canSubmit={submitAllowed && isAllPlaced}
         />
 
         <DraxProvider>
@@ -1517,6 +1593,7 @@ export default function MatchingTestScreen() {
       </View>
       </DraxProvider>
 
+      {!showExamNav && (
       <View className={`p-5 border-t ${
         themeMode === 'cyberpunk' 
           ? 'bg-black border-cyan-400/30' 
@@ -1548,6 +1625,7 @@ export default function MatchingTestScreen() {
           </TouchableOpacity>
         )}
         </View>
+      )}
       </ScrollView>
 
       {/* Reset Confirmation Modal */}
@@ -1593,7 +1671,31 @@ export default function MatchingTestScreen() {
         testName={testData?.test_name || 'Test'}
       />
 
+      {!showExamNav && (
+        <SubmitModal
+          visible={showSubmitModal}
+          onConfirm={() => {
+            setShowSubmitModal(false);
+            performSubmit();
+          }}
+          onCancel={() => setShowSubmitModal(false)}
+          testName={testData?.test_name || 'Test'}
+        />
+      )}
+
       <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
+
+      {showExamNav && (
+        <ExamNavFooter
+          themeMode={themeMode}
+          loading={navLoading}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          onPressPrev={navigatePrev}
+          onPressNext={navigateNext}
+          onPressReview={navigateReview}
+        />
+      )}
 
       {/* No back modal; navigate directly */}
     </View>

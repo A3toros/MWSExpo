@@ -4,7 +4,7 @@ cd android
 .\gradlew clean
 cd ..
 npx expo start -c
-npx expo run:android
+npx expo run:android --device
 
 npm i -g eas-cli
 eas build:configure

@@ -175,6 +175,12 @@ export function ActiveTestsView({
                             }
                           }
                           
+                          // Exam routing
+                          if (test.test_type === 'exam') {
+                            router.push(`/exam/${test.test_id}`);
+                            return;
+                          }
+
                           // Copy web app navigation logic exactly
                           if (test.test_type === 'matching_type') {
                             router.push(`/tests/matching/${test.test_id}`);
@@ -231,6 +237,12 @@ export function ActiveTestsView({
                     size="sm"
                     variant="modal"
                     onPress={() => {
+                      // Exam routing
+                      if (test.test_type === 'exam') {
+                        router.push(`/exam/${test.test_id}`);
+                        return;
+                      }
+
                       // Copy web app navigation logic exactly
                       if (test.test_type === 'matching_type') {
                         router.push(`/tests/matching/${test.test_id}`);

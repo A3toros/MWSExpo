@@ -93,7 +93,7 @@ class RecordingManager {
   /**
    * Stop recording and return the audio URI
    */
-  async stopRecording(): Promise<string> {
+  async stopRecording(): Promise<{ uri: string; durationMillis: number | null }> {
     if (!this.currentRecording || !this.isRecording) {
       throw new Error('No active recording to stop');
     }
@@ -124,7 +124,7 @@ class RecordingManager {
         console.warn('🎤 Warning: Recording duration is very short:', status.durationMillis, 'ms');
       }
       
-      return uri;
+      return { uri, durationMillis: status.durationMillis ?? null };
     } finally {
       // Always cleanup after stopping
       await this.cleanup();

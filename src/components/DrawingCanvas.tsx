@@ -46,15 +46,11 @@ export default function DrawingCanvas({
   onControlRef
 }: DrawingCanvasProps) {
   const [paths, setPaths] = useState<any[]>(() => {
-    console.log('🎨 DrawingCanvas initializing with paths:', initialPaths?.length || 0);
-    console.log('🎨 DrawingCanvas initialPaths sample:', initialPaths?.[0]);
     return initialPaths || [];
   });
 
   // Update paths when initialPaths changes (for question navigation)
   useEffect(() => {
-    console.log('🎨 DrawingCanvas: initialPaths changed, updating paths from', paths.length, 'to', initialPaths?.length || 0);
-    console.log('🎨 DrawingCanvas: initialPaths sample after change:', initialPaths?.[0]);
     setPaths(initialPaths || []);
     setHistory([initialPaths || []]);
     setHistoryIndex(0);
@@ -84,19 +80,6 @@ export default function DrawingCanvas({
   const [history, setHistory] = useState<any[][]>([initialPaths || []]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
-  // Debug: Log when component mounts/unmounts
-  useEffect(() => {
-    console.log('🎨 DrawingCanvas MOUNTED with initialPaths:', initialPaths?.length || 0);
-    return () => {
-      console.log('🎨 DrawingCanvas UNMOUNTED');
-    };
-  }, []);
-
-  // Debug: Log rendering info
-  useEffect(() => {
-    console.log('DrawingCanvas: Rendering paths count:', paths.length);
-    console.log('DrawingCanvas: Rendering currentPoints length:', currentPoints.length);
-  }, [paths.length, currentPoints.length]);
   
   // Zoom functionality (start at 100%)
   const MIN_ZOOM = 1;   // Fit-to-canvas
@@ -179,6 +162,7 @@ export default function DrawingCanvas({
     .shouldCancelWhenOutside(true) // Only activate within canvas
     .onBegin((e: any) => {
       if (!isTouchInCanvas(e.focalX, e.focalY)) return;
+      if (currentToolRef.current !== 'pan') return; // Only allow when pan tool is selected
       runOnJS(startPinch)(e.focalX, e.focalY);
     })
     .onUpdate((e: any) => {
@@ -216,6 +200,7 @@ export default function DrawingCanvas({
     .shouldCancelWhenOutside(true) // Only activate within canvas
     .onBegin((e: any) => {
       if (!isTouchInCanvas(e.x, e.y)) return;
+      if (currentToolRef.current !== 'pan') return; // Only allow when pan tool is selected
       runOnJS(startTwoFingerPan)();
     })
     .onUpdate((e: any) => {
@@ -229,17 +214,13 @@ export default function DrawingCanvas({
 
   const touchHandler = useTouchHandler({
     onStart: ({ x, y }) => {
-      console.log('DrawingCanvas: Touch start', { x, y, currentTool, isGestureActive });
-      
       // CRITICAL: Don't start drawing if gesture is active (pinch/pan)
       if (isGestureActive) {
-        console.log('DrawingCanvas: Gesture active, ignoring drawing');
         return; // Let pinch/pan gestures handle this
       }
       
       // Only process touches within canvas bounds
       if (!isTouchInCanvas(x, y)) {
-        console.log('DrawingCanvas: Touch outside canvas bounds, ignoring');
         return; // Let parent ScrollView handle this touch
       }
       
@@ -257,11 +238,9 @@ export default function DrawingCanvas({
       const p = toLogical(x, y);
       // Handle pencil/eraser tools
       if (toolAtStartRef.current === 'pencil' || toolAtStartRef.current === 'eraser') {
-        console.log('DrawingCanvas: Starting new pencil/eraser line, current paths count:', paths.length);
         const initialPoints = [{ x: p.x, y: p.y, color: currentColorRef.current || currentColor, thickness: strokeThicknessRef.current, tool: toolAtStartRef.current }];
         setCurrentPoints(initialPoints);
         currentPointsRef.current = initialPoints;
-        console.log('DrawingCanvas: Set initial currentPoints with 1 point');
       }
       // Handle shape tools
       else if (['line', 'rectangle', 'circle'].includes(toolAtStartRef.current)) {
@@ -317,8 +296,6 @@ export default function DrawingCanvas({
         return;
       }
       
-      console.log('DrawingCanvas: Touch active', { x, y, currentTool });
-      
       // Update text box rectangle while dragging
       if (toolAtStartRef.current === 'text' && currentShapeRef.current?.type === 'textBox') {
         const p = toLogical(x, y);
@@ -334,7 +311,6 @@ export default function DrawingCanvas({
         const newPoints = [...currentPointsRef.current, { x: p.x, y: p.y, color: currentColorRef.current || currentColor, thickness: strokeThicknessRef.current, tool: toolAtStartRef.current }];
         setCurrentPoints(newPoints);
         currentPointsRef.current = newPoints;
-        console.log('DrawingCanvas: Updating currentPoints, length:', newPoints.length);
       }
       // Handle shape tools
       else if (['line', 'rectangle', 'circle'].includes(toolAtStartRef.current)) {
@@ -348,14 +324,12 @@ export default function DrawingCanvas({
       }
     },
     onEnd: () => {
-      console.log('DrawingCanvas: Touch end', { currentTool, currentPointsLength: currentPointsRef.current.length, hasCurrentShape: !!currentShape, pathsCount: paths.length, isGestureActive });
-      
       // CRITICAL: Don't finalize drawing if gesture is active (pinch/pan)
       if (isGestureActive) {
-        console.log('DrawingCanvas: Gesture active, ignoring drawing finalization');
         return; // Let pinch/pan gestures handle this
       }
       
+      // CRITICAL: Pan tool should only pan, never draw
       if (toolAtStartRef.current === 'pan') {
         panStartRef.current = null;
         if (onDrawingStateChange && drawingFlagRef.current) { drawingFlagRef.current = false; onDrawingStateChange(false); }
@@ -377,19 +351,14 @@ export default function DrawingCanvas({
 
       // Handle pencil/eraser tools
       if ((toolAtStartRef.current === 'pencil' || toolAtStartRef.current === 'eraser') && currentPointsRef.current.length > 0) {
-        console.log('DrawingCanvas: About to add pencil/eraser path, currentPoints length:', currentPointsRef.current.length);
         setPaths(prevPaths => {
           const newPaths = [...prevPaths, currentPointsRef.current];
           saveToHistory(newPaths);
           onDrawingChange(newPaths);
-          console.log('DrawingCanvas: Added pencil/eraser path, total paths:', newPaths.length);
           return newPaths;
         });
         setCurrentPoints([]);
         currentPointsRef.current = [];
-        console.log('DrawingCanvas: currentPoints cleared');
-      } else {
-        console.log('DrawingCanvas: Not adding path - currentTool:', currentTool, 'currentPoints.length:', currentPointsRef.current.length);
       }
       
       // Handle shape tools
@@ -399,7 +368,6 @@ export default function DrawingCanvas({
           const newPaths = [...prevPaths, shapeToAdd];
           saveToHistory(newPaths);
           onDrawingChange(newPaths);
-          console.log('DrawingCanvas: Added shape, total paths:', newPaths.length);
           return newPaths;
         });
         setCurrentShape(null);
@@ -464,7 +432,6 @@ export default function DrawingCanvas({
           const newPaths = [...prevPaths, rectElement, textElement];
           saveToHistory(newPaths);
           onDrawingChange(newPaths);
-          console.log('DrawingCanvas: Added text box + text, total paths:', newPaths.length);
           return newPaths;
         });
         pendingTextBoxRef.current = null;
@@ -482,7 +449,6 @@ export default function DrawingCanvas({
           const newPaths = [...prevPaths, textElement];
           saveToHistory(newPaths);
           onDrawingChange(newPaths);
-          console.log('DrawingCanvas: Added text, total paths:', newPaths.length);
           return newPaths;
         });
       }

@@ -36,24 +36,25 @@ export const ErrorModal: React.FC<ErrorModalProps> = ({
             {themeMode === 'cyberpunk' ? title.toUpperCase() : title}
           </Text>
           
-          <Text className={`${modalStyles.text} ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
+          <Text className={`${modalStyles.text} text-center ${themeMode === 'cyberpunk' ? 'tracking-wider' : ''}`}>
             {themeMode === 'cyberpunk' ? message.toUpperCase() : message}
           </Text>
           
           <View className="flex-row space-x-3">
             {onCancel && (
-              <View className="flex-1">
+              <View className="flex-1 px-2">
                 <ThemedButton
                   title={themeMode === 'cyberpunk' ? 'CANCEL' : 'Cancel'}
                   onPress={onCancel}
                 />
               </View>
             )}
-            <View className={onCancel ? "flex-1" : "flex-1"}>
+            <View className={onCancel ? "flex-1 px-2" : "flex-1 px-2"}>
               <ThemedButton
                 title={themeMode === 'cyberpunk' ? 'TRY AGAIN' : 'Try Again'}
                 onPress={onRetry}
                 variant="modal"
+                style={{ paddingHorizontal: 16, paddingVertical: 12 }}
               />
             </View>
           </View>

@@ -9,6 +9,8 @@ import { api, getSubmissionMethod } from '../../../../src/services/apiClient';
 import { academicCalendarService } from '../../../../src/services/AcademicCalendarService';
 import { useAppSelector } from '../../../../src/store';
 import TestHeader from '../../../../src/components/TestHeader';
+import ExamTestHeader from '../../../../src/components/ExamTestHeader';
+import { useExamTimer } from '../../../../src/hooks/useExamTimer';
 import { SubmitModal } from '../../../../src/components/modals';
 import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
@@ -16,9 +18,13 @@ import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
+import { useExamNavigation } from '../../../../src/hooks/useExamNavigation';
+import ExamNavFooter from '../../../../src/components/ExamNavFooter';
 
 export default function WordMatchingTestScreen() {
-  const { testId } = useLocalSearchParams<{ testId: string }>();
+  const { testId, exam, examId } = useLocalSearchParams<{ testId: string; exam?: string; examId?: string }>();
+  const inExamContext = useMemo(() => exam === '1' && !!examId, [exam, examId]);
+  const showExamNav = inExamContext && !!examId;
   const user = useAppSelector((state) => state.auth.user);
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);
@@ -57,6 +63,49 @@ export default function WordMatchingTestScreen() {
   const remainingTimeRef = useRef<number>(0);
   const timerStartedAtRef = useRef<string>('');
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const {
+    loading: navLoading,
+    currentIndex: examTestIndex,
+    total: examTestsTotal,
+    navigatePrev,
+    navigateNext,
+    navigateReview,
+    examName,
+    totalMinutes,
+    cachedAnswers,
+  } = useExamNavigation({
+    examId,
+    currentTestId: testId,
+    currentTestType: 'word_matching',
+    enabled: showExamNav,
+    studentId,
+  });
+  const examTimeRemaining = useExamTimer({ examId, studentId: user?.student_id, totalMinutes });
+
+  // Prefill answers from cached exam data when in exam context
+  useEffect(() => {
+    if (!showExamNav || !user?.student_id || !examId || !testId) return;
+    const key = `exam_answer_${user.student_id}_${examId}_${testId}_word_matching`;
+    const preloaded = cachedAnswers?.[key];
+    if (preloaded && typeof preloaded === 'object') {
+      if (preloaded.answers) setAnswers(preloaded.answers);
+      if (preloaded.correctMap) setCorrectMap(preloaded.correctMap);
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.answers) setAnswers(parsed.answers);
+          if (parsed?.correctMap) setCorrectMap(parsed.correctMap);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [showExamNav, user?.student_id, examId, testId, cachedAnswers]);
 
   // Decide correctness for a left->right selection.
   const isSelectionCorrect = useCallback((leftIndex: number, rightIndex: number | undefined | null) => {
@@ -240,13 +289,28 @@ export default function WordMatchingTestScreen() {
     }
   }, [testId, checkTestCompleted]);
 
+  // Persist answers into exam-level key when in exam context
+  useEffect(() => {
+    if (!inExamContext || !studentId || !examId || !testId) return;
+    const payload = { answers };
+    const key = `exam_answer_${studentId}_${examId}_${testId}_word_matching`;
+    AsyncStorage.setItem(key, JSON.stringify(payload)).catch(() => {});
+  }, [answers, examId, inExamContext, studentId, testId]);
+
+  const submitAllowed = !showExamNav;
+
   // Submit test
   const submitTest = useCallback(async () => {
+    if (!submitAllowed) return;
     setShowSubmitModal(true);
-  }, []);
+  }, [submitAllowed]);
 
   // Actual submit function
   const performSubmit = useCallback(async () => {
+    if (!submitAllowed) {
+      setShowSubmitModal(false);
+      return;
+    }
     if (!testData) return;
 
     setIsSubmitting(true);
@@ -381,12 +445,12 @@ export default function WordMatchingTestScreen() {
       setIsSubmitting(false);
       setIsSubmittingToAPI(false);
     }
-  }, [user?.student_id, testId, testData, answers, caughtCheating, visibilityChangeTimes, timeElapsed, clearCheatingKeys]);
+  }, [user?.student_id, testId, testData, answers, caughtCheating, visibilityChangeTimes, timeElapsed, clearCheatingKeys, submitAllowed]);
 
   // Store performSubmit in ref to avoid dependency issues
   useEffect(() => {
-    performSubmitRef.current = performSubmit;
-  }, [performSubmit]);
+    performSubmitRef.current = submitAllowed ? performSubmit : undefined;
+  }, [performSubmit, submitAllowed]);
 
   // Extract student ID once on mount
   useEffect(() => {
@@ -615,9 +679,24 @@ export default function WordMatchingTestScreen() {
   if (showResults && testResults) {
     return (
       <View className={`flex-1 ${themeClasses.background}`}>
-        <TestHeader 
-          testName={testData.test_name}
-        />
+        {showExamNav ? (
+          <ExamTestHeader
+            themeMode={themeMode}
+            examId={examId}
+            examName={examName || 'Exam'}
+            testName={testData?.test_name}
+            currentIndex={examTestIndex}
+            total={examTestsTotal}
+            timeSeconds={examTimeRemaining}
+            onBack={() => router.back()}
+          />
+        ) : (
+          <TestHeader 
+            testName={testData.test_name}
+            onExit={() => router.back()}
+            showBackButton
+          />
+        )}
         
         <ScrollView className="flex-1">
           <View className="p-4">
@@ -863,9 +942,24 @@ export default function WordMatchingTestScreen() {
 
   return (
     <View className={`flex-1 ${themeClasses.background}`}>
-      <TestHeader 
-        testName={testData.test_name}
-      />
+      {showExamNav ? (
+        <ExamTestHeader
+          themeMode={themeMode}
+          examId={examId}
+          examName={examName || 'Exam'}
+          testName={testData?.test_name}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          timeSeconds={examTimeRemaining}
+          onBack={() => router.back()}
+        />
+      ) : (
+        <TestHeader 
+          testName={testData.test_name}
+          onExit={() => router.back()}
+          showBackButton
+        />
+      )}
       
       {/* Test Info Button */}
       <ScrollView className="flex-1">
@@ -909,9 +1003,9 @@ export default function WordMatchingTestScreen() {
             return true;
           }).length / (testData.leftWords?.length || 0)) * 100) : 0}
           timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
-          onSubmitTest={submitTest}
-          isSubmitting={isSubmitting}
-          canSubmit={isAllAnswered}
+          onSubmitTest={submitAllowed ? submitTest : undefined}
+          isSubmitting={submitAllowed ? isSubmitting : false}
+          canSubmit={submitAllowed && isAllAnswered}
         />
 
         <DraxProvider>
@@ -1038,55 +1132,73 @@ export default function WordMatchingTestScreen() {
         </View>
         </DraxProvider>
 
-        <View className="p-4">
-          {themeMode === 'cyberpunk' ? (
+        {!showExamNav && (
+          <View className="p-4">
+            {themeMode === 'cyberpunk' ? (
+              <TouchableOpacity
+                onPress={submitTest}
+                disabled={!isAllAnswered || isSubmitting}
+                style={{ alignSelf: 'center' }}
+              >
+                <Image 
+                  source={require('../../../../assets/images/save-cyberpunk.png')} 
+                  style={{ width: 40, height: 40 }}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            ) : (
             <TouchableOpacity
+              className={`py-3 px-6 rounded-lg ${
+                !isAllAnswered || isSubmitting 
+                  ? 'bg-gray-400' 
+                  : 'bg-[#8B5CF6]'
+              }`}
               onPress={submitTest}
               disabled={!isAllAnswered || isSubmitting}
-              style={{ alignSelf: 'center' }}
             >
-              <Image 
-                source={require('../../../../assets/images/save-cyberpunk.png')} 
-                style={{ width: 40, height: 40 }}
-                resizeMode="contain"
-              />
+              <Text className="text-white text-center font-semibold text-lg">
+                {isSubmitting ? 'Submitting...' : 'Submit Test'}
+              </Text>
             </TouchableOpacity>
-          ) : (
-          <TouchableOpacity
-            className={`py-3 px-6 rounded-lg ${
-              !isAllAnswered || isSubmitting 
-                ? 'bg-gray-400' 
-                : 'bg-[#8B5CF6]'
-            }`}
-            onPress={submitTest}
-            disabled={!isAllAnswered || isSubmitting}
-          >
-            <Text className="text-white text-center font-semibold text-lg">
-              {isSubmitting ? 'Submitting...' : 'Submit Test'}
-            </Text>
-          </TouchableOpacity>
-          )}
-        </View>
+            )}
+          </View>
+        )}
       </ScrollView>
 
-      {/* Submit Confirmation Modal */}
-      <SubmitModal
-        visible={showSubmitModal}
-        onCancel={() => setShowSubmitModal(false)}
-        onConfirm={performSubmit}
-        testName="Word Matching Test"
-      />
+      {showExamNav && (
+        <ExamNavFooter
+          themeMode={themeMode}
+          loading={navLoading}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          onPressPrev={navigatePrev}
+          onPressNext={navigateNext}
+          onPressReview={navigateReview}
+        />
+      )}
 
-      {/* Reset Confirmation Modal */}
-      <SubmitModal
-        visible={showResetModal}
-        onCancel={cancelReset}
-        onConfirm={confirmReset}
-        testName="Reset Test"
-      />
+      {!showExamNav && (
+        <>
+          {/* Submit Confirmation Modal */}
+          <SubmitModal
+            visible={showSubmitModal}
+            onCancel={() => setShowSubmitModal(false)}
+            onConfirm={performSubmit}
+            testName="Word Matching Test"
+          />
 
-      {/* API Submission Loading Modal */}
-      <LoadingModal visible={isSubmittingToAPI} message="Submitting Test..." showSpinner={true} />
+          {/* Reset Confirmation Modal */}
+          <SubmitModal
+            visible={showResetModal}
+            onCancel={cancelReset}
+            onConfirm={confirmReset}
+            testName="Reset Test"
+          />
+
+          {/* API Submission Loading Modal */}
+          <LoadingModal visible={isSubmittingToAPI} message="Submitting Test..." showSpinner={true} />
+        </>
+      )}
     </View>
   );
 }

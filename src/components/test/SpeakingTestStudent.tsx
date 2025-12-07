@@ -1,5 +1,5 @@
 /** @jsxImportSource nativewind */
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import { SecureToken } from '../../utils/secureTokenStorage';
 import { View, Text, ScrollView, Alert, ActivityIndicator, TouchableOpacity, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -25,6 +25,8 @@ interface SpeakingTestStudentProps {
   studentId?: string; // Optional - will be extracted from JWT if not provided
   showCorrectAnswers?: boolean;
   themeMode?: ThemeMode;
+  antiCheatingEnabled?: boolean;
+  initialTranscript?: string | null;
 }
 
 export default function SpeakingTestStudent({
@@ -36,11 +38,15 @@ export default function SpeakingTestStudent({
   studentId: propStudentId,
   showCorrectAnswers = false,
   themeMode = 'light',
+  antiCheatingEnabled = true,
+  initialTranscript = null,
 }: SpeakingTestStudentProps) {
   const { state, actions } = useSpeakingTest();
   const [extractedStudentId, setExtractedStudentId] = useState<string | null>(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [prefilledTranscript] = useState<string | null>(initialTranscript || null);
   const themeClasses = getThemeClasses(themeMode);
+  const hasLoggedStudentIdRef = useRef(false);
 
   // Helper function to decode JWT token and extract student ID
   const getStudentIdFromToken = async (): Promise<string | null> => {
@@ -74,7 +80,11 @@ export default function SpeakingTestStudent({
 
   // Use prop studentId if provided, otherwise use extracted from token
   const studentId = propStudentId || extractedStudentId || 'unknown';
-  console.log('🎤 Using student ID:', studentId, '(prop:', propStudentId, ', extracted:', extractedStudentId, ')');
+  useEffect(() => {
+    if (hasLoggedStudentIdRef.current) return;
+    console.log('🎤 Using student ID:', studentId, '(prop:', propStudentId, ', extracted:', extractedStudentId, ')');
+    hasLoggedStudentIdRef.current = true;
+  }, [studentId, propStudentId, extractedStudentId]);
 
   // Anti-cheating detection hook
   const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
@@ -82,7 +92,7 @@ export default function SpeakingTestStudent({
     studentId: studentId || '',
     testType: 'speaking',
     testId: testIdStr,
-    enabled: !!studentId && !!testId && studentId !== 'unknown',
+    enabled: !!studentId && !!testId && studentId !== 'unknown' && antiCheatingEnabled,
   });
 
   // Submit final results to database
@@ -524,6 +534,80 @@ export default function SpeakingTestStudent({
       }
       
       actions.setError(errorMessage);
+
+      // Offer re-record / resend like web app
+      Alert.alert(
+        'Audio processing failed',
+        errorMessage,
+        [
+          {
+            text: 'Re-record',
+            style: 'default',
+            onPress: () => {
+              actions.clearError();
+              actions.retryAttempt();
+            },
+          },
+          {
+            text: 'Resend last attempt',
+            style: 'default',
+            onPress: async () => {
+              try {
+                actions.clearError();
+                actions.startProcessing();
+                const currentQuestionId = state.questions[state.currentQuestionIndex]?.id || '1';
+                const analysis = await AIProcessingService.retryCachedPayload(
+                  studentId || 'unknown',
+                  testId,
+                  String(currentQuestionId),
+                  (progress) => actions.updateProcessing(progress.step, progress.progress)
+                );
+
+                actions.completeProcessing(analysis.transcript, analysis);
+
+                const feedback = {
+                  score: analysis.overall_score,
+                  maxScore: 100,
+                  percentage: analysis.overall_score,
+                  passed: analysis.overall_score >= 60,
+                  analysis: analysis,
+                  transcript: analysis.transcript,
+                  wordCount: analysis.word_count,
+                  grammarScore: analysis.grammar_score,
+                  vocabularyScore: analysis.vocabulary_score,
+                  pronunciationScore: analysis.pronunciation_score,
+                  fluencyScore: analysis.fluency_score,
+                  contentScore: analysis.content_score,
+                  grammarMistakes: analysis.grammar_mistakes,
+                  vocabularyMistakes: analysis.vocabulary_mistakes,
+                  improvedTranscript: analysis.improved_transcript,
+                  grammarCorrections: analysis.grammar_corrections,
+                  vocabularyCorrections: analysis.vocabulary_corrections,
+                  languageUseCorrections: analysis.language_use_corrections,
+                  pronunciationCorrections: analysis.pronunciation_corrections,
+                  aiFeedback: analysis.ai_feedback
+                };
+
+                actions.setFeedback(feedback);
+
+                const currentQuestion = state.questions[state.currentQuestionIndex];
+                if (currentQuestion) {
+                  onAnswerChange(currentQuestion.id, {
+                    audioUri: state.audioUri || '',
+                    transcript: analysis.transcript,
+                    analysis: analysis,
+                    feedback,
+                  });
+                }
+              } catch (retryError: any) {
+                console.error('Resend failed:', retryError);
+                actions.setError('Resend failed. Please re-record and try again.');
+              }
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
     } finally {
       // Processing state is managed by context, no need to set local state
     }

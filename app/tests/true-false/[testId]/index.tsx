@@ -1,5 +1,5 @@
 /** @jsxImportSource nativewind */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Alert, ActivityIndicator, ScrollView, TouchableOpacity, AppState, Image } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../../../../src/store';
@@ -10,6 +10,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import QuestionRenderer from '../../../../src/components/questions/QuestionRenderer';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
 import TestHeader from '../../../../src/components/TestHeader';
+import ExamTestHeader from '../../../../src/components/ExamTestHeader';
+import { useExamTimer } from '../../../../src/hooks/useExamTimer';
 import { SubmitModal } from '../../../../src/components/modals';
 import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
@@ -17,9 +19,13 @@ import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 import MathText from '../../../../src/components/math/MathText';
 import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
+import { useExamNavigation } from '../../../../src/hooks/useExamNavigation';
+import ExamNavFooter from '../../../../src/components/ExamNavFooter';
 
 export default function TrueFalseTestScreen() {
-  const { testId } = useLocalSearchParams();
+  const { testId, exam, examId } = useLocalSearchParams();
+  const inExamContext = useMemo(() => exam === '1' && !!examId, [exam, examId]);
+  const showExamNav = inExamContext && !!examId;
   const dispatch = useAppDispatch();
   const user = useAppSelector((state: any) => state.auth.user);
   const { themeMode } = useTheme();
@@ -34,6 +40,7 @@ export default function TrueFalseTestScreen() {
   const [answers, setAnswers] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [showResults, setShowResults] = useState(false);
@@ -47,6 +54,47 @@ export default function TrueFalseTestScreen() {
     testId: testIdStr,
     enabled: !!user?.student_id && !!testId,
   });
+
+  const {
+    loading: navLoading,
+    currentIndex: examTestIndex,
+    total: examTestsTotal,
+    navigatePrev,
+    navigateNext,
+    navigateReview,
+    examName,
+    totalMinutes,
+    cachedAnswers,
+  } = useExamNavigation({
+    examId,
+    currentTestId: testId,
+    currentTestType: 'true_false',
+    enabled: showExamNav,
+    studentId: user?.student_id,
+  });
+  const examTimeRemaining = useExamTimer({ examId, studentId: user?.student_id, totalMinutes });
+
+  // Prefill answers from cached exam data when in exam context
+  useEffect(() => {
+    if (!showExamNav || !user?.student_id || !examId || !testId) return;
+    const key = `exam_answer_${user.student_id}_${examId}_${testId}_true_false`;
+    const preloaded = cachedAnswers?.[key];
+    if (preloaded && Array.isArray(preloaded)) {
+      setAnswers(preloaded as any[]);
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setAnswers(parsed as any[]);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [showExamNav, user?.student_id, examId, testId, cachedAnswers]);
 
   // Load user data from AsyncStorage if not in Redux
   useEffect(() => {
@@ -112,6 +160,19 @@ export default function TrueFalseTestScreen() {
     
     loadUserData();
   }, []);
+
+  // Persist answers into exam-level key when in exam context
+  useEffect(() => {
+    if (!inExamContext || !user?.student_id || !examId || !testId || !questions.length) return;
+    const payload: Record<string | number, any> = {};
+    answers.forEach((ans, idx) => {
+      const q = questions[idx];
+      const qId = q?.question_id || q?.id || idx;
+      payload[qId] = ans ?? '';
+    });
+    const key = `exam_answer_${user.student_id}_${examId}_${testId}_true_false`;
+    AsyncStorage.setItem(key, JSON.stringify(payload)).catch(() => {});
+  }, [answers, examId, inExamContext, questions, testId, user?.student_id]);
 
   // Check if test is already completed (web app pattern)
   // IMPORTANT: Allow retests even if test is marked as completed
@@ -256,8 +317,11 @@ export default function TrueFalseTestScreen() {
     });
   }, [questions]);
 
+  const submitAllowed = !showExamNav;
+
   // Submit test
   const handleSubmit = useCallback(async () => {
+    if (!submitAllowed) return;
     if (isLoadingUser) {
       Alert.alert('Please Wait', 'Loading user data...');
       return;
@@ -275,10 +339,11 @@ export default function TrueFalseTestScreen() {
 
     // Show SubmitModal instead of Alert.alert
     setShowSubmitModal(true);
-  }, [user?.student_id, testData, questions, answers, testId]);
+  }, [user?.student_id, testData, questions, answers, testId, submitAllowed, isLoadingUser]);
 
   // Actual submit function
   const submitTest = useCallback(async () => {
+    if (!submitAllowed) return;
     if (isLoadingUser) {
       Alert.alert('Please Wait', 'Loading user data...');
       return;
@@ -764,9 +829,24 @@ export default function TrueFalseTestScreen() {
 
   return (
     <View className={`flex-1 ${themeClasses.background}`}>
-      <TestHeader 
-        testName={testData.test_name || testData.title}
-      />
+      {showExamNav ? (
+        <ExamTestHeader
+          themeMode={themeMode}
+          examId={examId}
+          examName={examName || 'Exam'}
+          testName={testData?.test_name || testData?.title}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          timeSeconds={examTimeRemaining}
+          onBack={() => router.back()}
+        />
+      ) : (
+        <TestHeader 
+          testName={testData.test_name || testData.title}
+          onExit={() => router.back()}
+          showBackButton
+        />
+      )}
       
       {/* Test Info Button */}
       <ScrollView className="flex-1">
@@ -783,9 +863,9 @@ export default function TrueFalseTestScreen() {
           totalQuestions={questions.length}
           percentage={questions.length > 0 ? Math.round((answers.filter(answer => answer && answer.trim() !== '').length / questions.length) * 100) : 0}
           timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
-          onSubmitTest={handleSubmit}
-          isSubmitting={isSubmitting}
-          canSubmit={answers.filter(answer => answer && answer.trim() !== '').length === questions.length}
+          onSubmitTest={submitAllowed ? handleSubmit : undefined}
+          isSubmitting={submitAllowed ? isSubmitting : false}
+          canSubmit={submitAllowed && answers.filter(answer => answer && answer.trim() !== '').length === questions.length}
         />
 
         {questions.map((question, index) => (
@@ -802,37 +882,39 @@ export default function TrueFalseTestScreen() {
           </View>
         ))}
 
-        <View className="mt-6">
-          {themeMode === 'cyberpunk' ? (
-            <TouchableOpacity
-              onPress={() => setShowSubmitModal(true)}
-              disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
-              style={{ alignSelf: 'center' }}
-            >
-              <Image 
-                source={require('../../../../assets/images/save-cyberpunk.png')} 
-                style={{ width: 40, height: 40 }}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              className={`py-3 px-4 rounded-lg ${
-                (answers.filter(answer => answer && answer.trim() !== '').length === questions.length && !isSubmitting) 
-                  ? 'bg-[#8B5CF6]' 
-                  : 'bg-gray-400'
-              }`}
-              disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
-              onPress={() => setShowSubmitModal(true)}
-            >
-              <Text className="text-white text-center font-semibold">
-                {isLoadingUser ? 'Loading...' : isSubmitting ? 'Submitting...' : 'Submit Test'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        {!showExamNav && (
+          <View className="mt-6">
+            {themeMode === 'cyberpunk' ? (
+              <TouchableOpacity
+                onPress={() => setShowSubmitModal(true)}
+                disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
+                style={{ alignSelf: 'center' }}
+              >
+                <Image 
+                  source={require('../../../../assets/images/save-cyberpunk.png')} 
+                  style={{ width: 40, height: 40 }}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                className={`py-3 px-4 rounded-lg ${
+                  (answers.filter(answer => answer && answer.trim() !== '').length === questions.length && !isSubmitting) 
+                    ? 'bg-[#8B5CF6]' 
+                    : 'bg-gray-400'
+                }`}
+                disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
+                onPress={() => setShowSubmitModal(true)}
+              >
+                <Text className="text-white text-center font-semibold">
+                  {isLoadingUser ? 'Loading...' : isSubmitting ? 'Submitting...' : 'Submit Test'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
-        {submitError && (
+        {!showExamNav && submitError && (
           <View className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
             <Text className="text-red-600 text-center">{submitError}</Text>
           </View>
@@ -840,17 +922,33 @@ export default function TrueFalseTestScreen() {
       </View>
       </ScrollView>
 
-      {/* Confirmation Modal (reused for submit and back) */}
-      <SubmitModal
-        visible={showSubmitModal}
-        onConfirm={() => {
-          setShowSubmitModal(false);
-          submitTest();
-        }}
-        onCancel={() => setShowSubmitModal(false)}
-        testName={testData?.test_name || 'Test'}
-      />
-    <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
+      {showExamNav && (
+        <ExamNavFooter
+          themeMode={themeMode}
+          loading={navLoading}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          onPressPrev={navigatePrev}
+          onPressNext={navigateNext}
+          onPressReview={navigateReview}
+        />
+      )}
+
+      {!showExamNav && (
+        <>
+          {/* Confirmation Modal (reused for submit and back) */}
+          <SubmitModal
+            visible={showSubmitModal}
+            onConfirm={() => {
+              setShowSubmitModal(false);
+              submitTest();
+            }}
+            onCancel={() => setShowSubmitModal(false)}
+            testName={testData?.test_name || 'Test'}
+          />
+          <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
+        </>
+      )}
     </View>
   );
 }

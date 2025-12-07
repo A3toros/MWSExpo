@@ -8,6 +8,8 @@ import { academicCalendarService } from '../../../../src/services/AcademicCalend
 import QuestionRenderer from '../../../../src/components/questions/QuestionRenderer';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
 import TestHeader from '../../../../src/components/TestHeader';
+import ExamTestHeader from '../../../../src/components/ExamTestHeader';
+import { useExamTimer } from '../../../../src/hooks/useExamTimer';
 import { SubmitModal } from '../../../../src/components/modals';
 import { useAppDispatch, useAppSelector } from '../../../../src/store';
 import { hydrateSuccess } from '../../../../src/store/slices/authSlice';
@@ -17,9 +19,15 @@ import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { getRetestAssignmentId, markTestCompleted, handleRetestCompletion } from '../../../../src/utils/retestUtils';
 import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
+import { useExamNavigation } from '../../../../src/hooks/useExamNavigation';
+import ExamNavFooter from '../../../../src/components/ExamNavFooter';
 
 export default function TestRunnerScreen() {
-  const { testId, type } = useLocalSearchParams<{ testId: string; type?: string }>();
+  const { testId, type, exam, examId } = useLocalSearchParams<{ testId: string; type?: string; exam?: string; examId?: string }>();
+  const inExamContext = useMemo(() => exam === '1' && !!examId, [exam, examId]);
+  const submitAllowed = !inExamContext;
+  const resolvedType = useMemo(() => (type ? String(type) : 'input'), [type]);
+  const showExamNav = inExamContext && !!examId;
   const dispatch = useAppDispatch();
   const answers = useAppSelector((s: any) => s.testSession.answers);
   const user = useAppSelector((state: any) => state.auth.user);
@@ -49,8 +57,26 @@ export default function TestRunnerScreen() {
     studentId: user?.student_id || '',
     testType: 'input',
     testId: testIdStr,
-    enabled: !!user?.student_id && !!testId,
+    enabled: !!user?.student_id && !!testId && !inExamContext,
   });
+  const {
+    loading: navLoading,
+    currentIndex: examTestIndex,
+    total: examTestsTotal,
+    navigatePrev,
+    navigateNext,
+    navigateReview,
+    examName,
+    totalMinutes,
+    cachedAnswers,
+  } = useExamNavigation({
+    examId,
+    currentTestId: testId,
+    currentTestType: 'input',
+    enabled: showExamNav,
+    studentId: user?.student_id,
+  });
+  const examTimeRemaining = useExamTimer({ examId, studentId: user?.student_id, totalMinutes });
   const resultsCommittedRef = useRef<boolean>(false);
   const restorationDoneRef = useRef<string | null>(null); // Track which test was restored
 
@@ -146,6 +172,43 @@ export default function TestRunnerScreen() {
     loadUserData();
   }, [dispatch, user]);
 
+  // Persist answers into exam-level key when in exam context
+  useEffect(() => {
+    if (!inExamContext || !user?.student_id || !examId || !testId || !questions.length) return;
+    const payload: Record<string | number, any> = {};
+    Object.keys(answers || {}).forEach((key) => {
+      payload[key] = (answers as any)[key] ?? '';
+    });
+    const key = `exam_answer_${user.student_id}_${examId}_${testId}_input`;
+    AsyncStorage.setItem(key, JSON.stringify(payload)).catch(() => {});
+  }, [answers, examId, inExamContext, questions.length, testId, user?.student_id]);
+
+  // Prefill answers from cached exam data when in exam context
+  useEffect(() => {
+    if (!inExamContext || !user?.student_id || !examId || !testId) return;
+    const key = `exam_answer_${user.student_id}_${examId}_${testId}_input`;
+    const preloaded = cachedAnswers?.[key];
+    if (preloaded) {
+      Object.entries(preloaded).forEach(([qid, val]) => {
+        dispatch(setAnswer({ questionId: String(qid), value: val as any }));
+      });
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          Object.entries(parsed).forEach(([qid, val]) => {
+            dispatch(setAnswer({ questionId: String(qid), value: val as any }));
+          });
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [inExamContext, user?.student_id, examId, testId, cachedAnswers]);
+
   // Load test data - use ref to prevent multiple loads
   const loadTestDataRef = useRef<string | null>(null);
   const isLoadingRef = useRef<boolean>(false);
@@ -186,8 +249,8 @@ export default function TestRunnerScreen() {
     })();
 
     // Prevent multiple loads for the same test - check if already loaded
-    const testKey = testId && type ? `${testId}_${type}` : null;
-    if (!testId || !type || !testKey) {
+    const testKey = testId && resolvedType ? `${testId}_${resolvedType}` : null;
+    if (!testId || !resolvedType || !testKey) {
       return;
     }
     
@@ -215,7 +278,7 @@ export default function TestRunnerScreen() {
     const load = async () => {
       // CRITICAL: Check if already loaded for this test BEFORE any async operations
       const currentTestId = String(testId);
-      const restoreTestKey = `${currentTestId}_${type}`;
+      const restoreTestKey = `${currentTestId}_${resolvedType}`;
       if (restorationDoneRef.current === restoreTestKey && testData && questions.length > 0) {
         return;
       }
@@ -225,15 +288,15 @@ export default function TestRunnerScreen() {
         setLoading(true);
         
         const res = await api.get('/api/get-test-questions', { 
-          params: { test_type: type, test_id: testId } 
+          params: { test_type: resolvedType, test_id: testId, ai_powered: true }
         });
         
         if (res.data.success) {
-          const qs = res.data.questions ?? [];
-          setTestData(res.data.test_info || res.data.data);
+        const qs = res.data.questions ?? [];
+        setTestData(res.data.test_info || res.data.data || res.data);
           setQuestions(qs);
           const order = qs.map((q: any, idx: number) => q?.id ?? idx);
-          dispatch(startTest({ testId: String(testId), type: String(type || ''), questionOrder: order }));
+          dispatch(startTest({ testId: String(testId), type: resolvedType, questionOrder: order }));
 
           // Restore saved progress - ONLY ONCE per test load
           // restoreTestKey is already calculated above
@@ -251,7 +314,7 @@ export default function TestRunnerScreen() {
               // Restore asynchronously - ref already set, so concurrent calls will skip
               (async () => {
                 try {
-                  const progressKey = `test_progress_${user.student_id}_${type}_${testId}`;
+                  const progressKey = `test_progress_${user.student_id}_${resolvedType}_${testId}`;
                   const savedRaw = await AsyncStorage.getItem(progressKey);
                   
                   if (savedRaw) {
@@ -294,7 +357,7 @@ export default function TestRunnerScreen() {
     load();
     // Only depend on testId and type - user is checked inside but not in deps to avoid loops
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testId, type]);
+  }, [testId, resolvedType]);
 
   // Auto-save functionality - use ref to avoid dependency issues
   const autoSaveRefCallback = useRef<() => Promise<void>>();
@@ -318,7 +381,7 @@ export default function TestRunnerScreen() {
         seconds, // Use current seconds value
         startedAt: Date.now() - (seconds * 1000)
       };
-      const progressKey = `test_progress_${user.student_id}_${type}_${testId}`;
+      const progressKey = `test_progress_${user.student_id}_${resolvedType}_${testId}`;
       await AsyncStorage.setItem(progressKey, JSON.stringify(saveData));
       setLastSaved(new Date());
     } catch (error) {
@@ -385,6 +448,12 @@ export default function TestRunnerScreen() {
     if (!questions || questions.length === 0) return false;
     return answeredCount === questions.length;
   }, [answeredCount, questions.length]);
+
+  const firstQuestionId = useMemo(() => {
+    if (!questions || !questions.length) return null;
+    const q0 = questions[0];
+    return String(q0?.id ?? q0?.question_id ?? '0');
+  }, [questions]);
 
   // Handle test completion
   const handleTestComplete = useCallback(() => {
@@ -570,11 +639,33 @@ export default function TestRunnerScreen() {
 
   // Handle test submission
   // Memoize handleAnswerChange to prevent QuestionRenderer useEffect from running repeatedly
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
+  useEffect(() => {
+    if (questions && questions.length && !activeQuestionId) {
+      const q0 = questions[0];
+      setActiveQuestionId(String(q0?.id ?? q0?.question_id ?? '0'));
+    }
+  }, [questions, activeQuestionId]);
+
   const handleAnswerChange = useCallback((questionId: string | number, val: any) => {
-    dispatch(setAnswer({ questionId: String(questionId), value: val }));
+    const qid = String(questionId);
+    setActiveQuestionId(qid);
+    dispatch(setAnswer({ questionId: qid, value: val }));
   }, [dispatch]);
 
+  const appendMathSymbol = useCallback(
+    (symbol: string) => {
+      const target = activeQuestionId ?? firstQuestionId;
+      if (!target) return;
+      const current = answers?.[String(target)] ?? '';
+      const next = `${current || ''}${symbol}`;
+      handleAnswerChange(String(target), next);
+    },
+    [activeQuestionId, firstQuestionId, answers, handleAnswerChange],
+  );
+
   const handleSubmit = useCallback(async () => {
+    if (!submitAllowed) return;
     if (isLoadingUser) {
       Alert.alert('Please Wait', 'Loading user data...');
       return;
@@ -594,8 +685,11 @@ export default function TestRunnerScreen() {
     setIsSubmitting(true);
     setSubmitError(null);
 
-    // Pre-compute score for input questions using correct_answers
+    const isAiPowered = !!(testData?.ai_powered || testData?.is_ai_powered);
+
+    // Pre-compute score for input questions using correct_answers (skip if AI-powered)
     const computedScore = (() => {
+      if (isAiPowered) return null;
       try {
         if (!Array.isArray(questions) || questions.length === 0) return 0;
         let correct = 0;
@@ -609,25 +703,14 @@ export default function TestRunnerScreen() {
           // Check if answer is correct
           if (val.length > 0 && normalized.length > 0) {
             const isCorrect = normalized.some((correctAns: string) => {
-              // First check for exact match (backward compatibility)
-              if (val === correctAns) {
-                return true;
-              }
-              
-              // Then check if trimmed correct answer is present in trimmed student answer
-              // This accepts answers with extra letters/numbers (e.g., "Paris123" contains "Paris")
+              if (val === correctAns) return true;
               if (correctAns && val.includes(correctAns)) {
-                // For single character answers, only match if at start/end (to avoid false positives like "a" in "cat")
-                // For multi-character answers, accept any substring match
                 if (correctAns.length === 1) {
-                  // Single character: must be at start or end of answer
                   return val.startsWith(correctAns) || val.endsWith(correctAns);
                 } else {
-                  // Multi-character: accept substring match
                   return true;
                 }
               }
-              
               return false;
             });
             
@@ -650,7 +733,7 @@ export default function TestRunnerScreen() {
       const payload = {
         test_id: testId,
         test_name: testData.test_name || testData.title,
-        test_type: 'input',
+        test_type: resolvedType,
         teacher_id: testData.teacher_id,
         subject_id: testData.subject_id,
         student_id: studentId,
@@ -674,7 +757,16 @@ export default function TestRunnerScreen() {
         }, {} as Record<string, string>),
         question_order: questions.map(q => q.question_id),
         retest_assignment_id: retestAssignmentId,
-        parent_test_id: testId
+        parent_test_id: testId,
+        ai_powered: isAiPowered,
+        evaluation_model: isAiPowered ? 'gpt-4o-mini' : undefined,
+        questions_for_ai: isAiPowered
+          ? questions.map((q, idx) => ({
+              question_id: q?.question_id ?? q?.id ?? idx,
+              question_text: q?.question,
+              correct_answers: q?.correct_answers ?? q?.correct_answer ?? null,
+            }))
+          : undefined,
       };
 
       // Submit directly to input test endpoint (like multiple-choice test)
@@ -688,24 +780,27 @@ export default function TestRunnerScreen() {
           // Handle retest completion (backend is authoritative)
           if (studentId) {
             const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
-            const percentage = Math.round((computedScore / questions.length) * 100);
+            const resolvedScore = isAiPowered
+              ? (response.data.score ?? response.data.data?.score ?? computedScore ?? 0)
+              : computedScore ?? 0;
+            const percentage = questions.length > 0 ? Math.round((resolvedScore / questions.length) * 100) : 0;
             
             // Use handleRetestCompletion for retests (sets completion key, backend handles attempt tracking)
-            await handleRetestCompletion(studentId, 'input', testIdStr, {
+            await handleRetestCompletion(studentId, resolvedType, testIdStr, {
               success: true,
               percentage: percentage,
               percentage_score: percentage
             });
             
             // Also mark test as completed using markTestCompleted for consistency
-            await markTestCompleted(studentId, 'input', testIdStr);
+            await markTestCompleted(studentId, resolvedType, testIdStr);
             
             // Cache the test results immediately after successful submission (web app pattern)
             const cacheKey = `student_results_table_${studentId}`;
             await AsyncStorage.setItem(cacheKey, JSON.stringify(response.data));
           }
           
-          // Build local detailed analysis from the exact snapshot we submitted
+          // Build local detailed analysis from the exact snapshot we submitted (still works for AI; may show 0 if server-only scoring)
           buildLocalResults(answers);
         } else {
           throw new Error(response.data.error || response.data.message || 'Test submission failed');
@@ -766,12 +861,13 @@ export default function TestRunnerScreen() {
   // Use ref for handleSubmit to avoid timer effect re-running
   const handleSubmitRef = useRef<() => Promise<void>>();
   useEffect(() => {
-    handleSubmitRef.current = handleSubmit;
-  }, [handleSubmit]);
+    handleSubmitRef.current = submitAllowed ? handleSubmit : undefined;
+  }, [handleSubmit, submitAllowed]);
 
   // Timer effect - only start if test has timer enabled
   const timerInitializedRef = useRef(false);
   useEffect(() => {
+    if (!submitAllowed) return;
     if (!testData || !questions.length || !user?.student_id) return;
     
     // Only start timer if test has a time limit set
@@ -844,7 +940,7 @@ export default function TestRunnerScreen() {
       };
     }
     // If no timer, don't start anything
-  }, [testData, questions.length, user?.student_id, testId]);
+  }, [testData, questions.length, user?.student_id, testId, submitAllowed]);
 
   // Show test results if available
   if (showResults && testResults) {
@@ -866,10 +962,24 @@ export default function TestRunnerScreen() {
 
   return (
     <View className={`flex-1 ${themeClasses.background}`}>
-      <TestHeader 
-        testName={testData?.test_name || testData?.title || `Test #${testId}`}
-        onExit={() => router.back()}
-      />
+      {showExamNav ? (
+        <ExamTestHeader
+          themeMode={themeMode}
+          examId={examId}
+          examName={examName || 'Exam'}
+          testName={testData?.test_name || testData?.title || `Test #${testId}`}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          timeSeconds={examTimeRemaining}
+          onBack={() => router.back()}
+        />
+      ) : (
+        <TestHeader 
+          testName={testData?.test_name || testData?.title || `Test #${testId}`}
+          onExit={() => router.back()}
+          showBackButton
+        />
+      )}
       
       <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
         {/* Progress Tracker */}
@@ -879,6 +989,9 @@ export default function TestRunnerScreen() {
             totalQuestions={questions.length}
             percentage={questions.length > 0 ? Math.round((answeredCount / questions.length) * 100) : 0}
             timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
+            onSubmitTest={!showExamNav ? () => setShowSubmitModal(true) : undefined}
+            isSubmitting={!showExamNav ? isSubmitting : false}
+            canSubmit={!showExamNav && allAnswered}
           />
         </View>
         
@@ -902,84 +1015,124 @@ export default function TestRunnerScreen() {
         ) : (
           <View className="px-4">
             <Text className="text-lg font-semibold text-gray-800 mb-4 text-center">All Questions ({questions.length} total)</Text>
-            {questions.map((q, index) => {
+      {questions.map((q, index) => {
               // Ensure each question has a unique ID
               const qid = q?.id ?? q?.question_id ?? `q_${index}`;
               const value = answers[String(qid)] as any;
+        const mergedInputProps = {
+                ...textInputProps,
+                onFocus: () => {
+                  textInputProps?.onFocus?.();
+                  setActiveQuestionId(String(qid));
+                },
+              };
+        const questionType = String(q?.question_type || resolvedType);
               
               return (
                 <View key={`question_${qid}_${index}`} className="mb-6">
                   <QuestionRenderer
                     question={q}
                     testId={String(testId)}
-                    testType={String(q?.question_type || type || '')}
+              testType={questionType}
                     displayNumber={index + 1}
                     studentId={user?.student_id || ''}
                     value={value}
                     onChange={handleAnswerChange}
-                    textInputProps={textInputProps}
+                    textInputProps={mergedInputProps}
                   />
                 </View>
               );
             })}
 
-            {/* Submit Button */}
-            <View className="mt-6 mb-4">
-              {themeMode === 'cyberpunk' ? (
-                <TouchableOpacity
-                  onPress={() => setShowSubmitModal(true)}
-                  disabled={!allAnswered || isSubmitting}
-                  style={{ alignSelf: 'center' }}
-                >
-                  <Image 
-                    source={require('../../../../assets/images/save-cyberpunk.png')} 
-                    style={{ width: 40, height: 40 }}
-                    resizeMode="contain"
-                  />
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  onPress={() => setShowSubmitModal(true)}
-                  disabled={!allAnswered || isSubmitting}
-                  className={`w-full py-4 px-6 rounded-lg ${
-                    allAnswered && !isSubmitting
-                      ? 'bg-violet-600 active:bg-violet-700'
-                      : 'bg-gray-300'
-                  }`}
-                >
-                  <View className="flex-row items-center justify-center">
-                    {isSubmitting ? (
-                      <>
-                        <ActivityIndicator size="small" color="white" className="mr-2" />
-                        <Text className="text-white font-semibold text-lg">Submitting...</Text>
-                      </>
-                    ) : (
-                      <Text className={`font-semibold text-lg ${
-                        allAnswered ? 'text-white' : 'text-gray-500'
-                      }`}>
-                        Submit Test
-                      </Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              )}
-            </View>
+            {testData?.is_math ? (
+              <View className="mt-2 mb-4">
+                <Text className="text-center text-sm text-gray-700 dark:text-gray-200 mb-2">Math buttons</Text>
+                <View className="flex-row flex-wrap gap-2 justify-center">
+                  {['7','8','9','÷','4','5','6','×','1','2','3','-','0','.','+','=','(',')','^','√'].map((sym) => (
+                    <TouchableOpacity
+                      key={sym}
+                      onPress={() => appendMathSymbol(sym)}
+                      className="px-3 py-2 rounded-lg bg-gray-200 dark:bg-gray-700"
+                    >
+                      <Text className="text-base font-semibold text-gray-900 dark:text-gray-100">{sym}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            {!showExamNav && (
+              <>
+                {/* Submit Button */}
+                <View className="mt-6 mb-4">
+                  {themeMode === 'cyberpunk' ? (
+                    <TouchableOpacity
+                      onPress={() => setShowSubmitModal(true)}
+                      disabled={!allAnswered || isSubmitting}
+                      style={{ alignSelf: 'center' }}
+                    >
+                      <Image 
+                        source={require('../../../../assets/images/save-cyberpunk.png')} 
+                        style={{ width: 40, height: 40 }}
+                        resizeMode="contain"
+                      />
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => setShowSubmitModal(true)}
+                      disabled={!allAnswered || isSubmitting}
+                      className={`w-full py-4 px-6 rounded-lg ${
+                        allAnswered && !isSubmitting
+                          ? 'bg-violet-600 active:bg-violet-700'
+                          : 'bg-gray-300'
+                      }`}
+                    >
+                      <View className="flex-row items-center justify-center">
+                        {isSubmitting ? (
+                          <>
+                            <ActivityIndicator size="small" color="white" className="mr-2" />
+                            <Text className="text-white font-semibold text-lg">Submitting...</Text>
+                          </>
+                        ) : (
+                          <Text className={`font-semibold text-lg ${
+                            allAnswered ? 'text-white' : 'text-gray-500'
+                          }`}>
+                            Submit Test
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            )}
           </View>
         )}
       </ScrollView>
 
-      {/* Submit Confirmation Modal */}
-      <SubmitModal
-        visible={showSubmitModal}
-        onConfirm={() => {
-          setShowSubmitModal(false);
-          handleSubmit();
-        }}
-        onCancel={() => {
-          setShowSubmitModal(false);
-        }}
-        testName={testData?.test_name || `Test #${testId}`}
-      />
+      {showExamNav ? (
+        <ExamNavFooter
+          themeMode={themeMode}
+          loading={navLoading}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          onPressPrev={navigatePrev}
+          onPressNext={navigateNext}
+          onPressReview={navigateReview}
+        />
+      ) : (
+        <SubmitModal
+          visible={showSubmitModal}
+          onConfirm={() => {
+            setShowSubmitModal(false);
+            handleSubmit();
+          }}
+          onCancel={() => {
+            setShowSubmitModal(false);
+          }}
+          testName={testData?.test_name || `Test #${testId}`}
+        />
+      )}
     </View>
   );
 }

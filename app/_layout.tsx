@@ -222,6 +222,9 @@ function AppContent() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           {/* Hide native header for all test routes; keep custom headers */}
           <Stack.Screen name="tests" options={{ headerShown: false }} />
+          {/* Exam route */}
+          <Stack.Screen name="exam" options={{ headerShown: false }} />
+          <Stack.Screen name="exam/[examId]" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
         </Stack>
       ) : null}

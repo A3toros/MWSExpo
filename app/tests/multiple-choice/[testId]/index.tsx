@@ -1,5 +1,5 @@
 /** @jsxImportSource nativewind */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Alert, ActivityIndicator, ScrollView, TouchableOpacity, AppState, Image } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../../../../src/store';
@@ -14,12 +14,18 @@ import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import TestHeader from '../../../../src/components/TestHeader';
+import ExamTestHeader from '../../../../src/components/ExamTestHeader';
+import { useExamTimer } from '../../../../src/hooks/useExamTimer';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 import MathText from '../../../../src/components/math/MathText';
 import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
+import { useExamNavigation } from '../../../../src/hooks/useExamNavigation';
+import ExamNavFooter from '../../../../src/components/ExamNavFooter';
 
 export default function MultipleChoiceTestScreen() {
-  const { testId } = useLocalSearchParams();
+  const { testId, exam, examId } = useLocalSearchParams();
+  const inExamContext = useMemo(() => exam === '1' && !!examId, [exam, examId]);
+  const showExamNav = inExamContext && !!examId;
   const dispatch = useAppDispatch();
   const user = useAppSelector((state: any) => state.auth.user);
   const { themeMode } = useTheme();
@@ -38,6 +44,28 @@ export default function MultipleChoiceTestScreen() {
   const [testResults, setTestResults] = useState<any>(null);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
 
+  // Prefill answers from cached exam data when in exam context
+  useEffect(() => {
+    if (!showExamNav || !user?.student_id || !examId || !testId) return;
+    const key = `exam_answer_${user.student_id}_${examId}_${testId}_multiple_choice`;
+    const preloaded = cachedAnswers?.[key];
+    if (preloaded && Array.isArray(preloaded)) {
+      setAnswers(preloaded as any[]);
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setAnswers(parsed as any[]);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [showExamNav, user?.student_id, examId, testId, cachedAnswers]);
+
   // Anti-cheating detection hook
   const { caughtCheating, visibilityChangeTimes, clearCheatingKeys, textInputProps } = useAntiCheatingDetection({
     studentId: user?.student_id || '',
@@ -45,6 +73,25 @@ export default function MultipleChoiceTestScreen() {
     testId: testId || '',
     enabled: !!user?.student_id && !!testId,
   });
+
+  const {
+    loading: navLoading,
+    currentIndex: examTestIndex,
+    total: examTestsTotal,
+    navigatePrev,
+    navigateNext,
+    navigateReview,
+    examName,
+    totalMinutes,
+  cachedAnswers,
+  } = useExamNavigation({
+    examId,
+    currentTestId: testId,
+    currentTestType: 'multiple_choice',
+    enabled: showExamNav,
+  studentId: user?.student_id,
+  });
+  const examTimeRemaining = useExamTimer({ examId, studentId: user?.student_id, totalMinutes });
 
   // Simple student ID extraction
   const getStudentIdFromToken = async (): Promise<string | null> => {
@@ -90,6 +137,19 @@ export default function MultipleChoiceTestScreen() {
     
     loadUserData();
   }, []);
+
+  // Persist answers into exam-level key when in exam context
+  useEffect(() => {
+    if (!inExamContext || !user?.student_id || !examId || !testId || !questions.length) return;
+    const payload: Record<string | number, any> = {};
+    answers.forEach((ans, idx) => {
+      const q = questions[idx];
+      const qId = q?.question_id || q?.id || idx;
+      payload[qId] = ans ?? '';
+    });
+    const key = `exam_answer_${user.student_id}_${examId}_${testId}_multiple_choice`;
+    AsyncStorage.setItem(key, JSON.stringify(payload)).catch(() => {});
+  }, [answers, examId, inExamContext, questions, testId, user?.student_id]);
 
   // Check if test is already completed (web app pattern)
   // IMPORTANT: Allow retests even if test is marked as completed
@@ -751,9 +811,24 @@ export default function MultipleChoiceTestScreen() {
 
   return (
     <View className={`flex-1 ${themeClasses.background}`}>
-      <TestHeader 
-        testName={testData.test_name || testData.title}
-      />
+      {showExamNav ? (
+        <ExamTestHeader
+          themeMode={themeMode}
+          examId={examId}
+          examName={examName || 'Exam'}
+          testName={testData?.test_name || testData?.title}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          timeSeconds={examTimeRemaining}
+          onBack={() => router.back()}
+        />
+      ) : (
+        <TestHeader 
+          testName={testData.test_name || testData.title}
+          onExit={() => router.back()}
+          showBackButton
+        />
+      )}
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 20 }}>
         <View className={`m-4 p-4 rounded-xl border shadow-sm ${
           themeMode === 'cyberpunk' 
@@ -767,9 +842,9 @@ export default function MultipleChoiceTestScreen() {
           totalQuestions={questions.length}
           percentage={questions.length > 0 ? Math.round((answers.filter(answer => answer && answer.trim() !== '').length / questions.length) * 100) : 0}
           timeRemaining={testData?.allowed_time > 0 ? Math.max(0, (testData.allowed_time || testData.time_limit) - timeElapsed) : undefined}
-          onSubmitTest={() => setShowSubmitModal(true)}
-          isSubmitting={isSubmitting}
-          canSubmit={answers.filter(answer => answer && answer.trim() !== '').length === questions.length}
+          onSubmitTest={!showExamNav ? () => setShowSubmitModal(true) : undefined}
+          isSubmitting={!showExamNav ? isSubmitting : false}
+          canSubmit={!showExamNav && answers.filter(answer => answer && answer.trim() !== '').length === questions.length}
         />
 
         {questions.map((question, index) => (
@@ -786,39 +861,41 @@ export default function MultipleChoiceTestScreen() {
           </View>
         ))}
 
-        <View className="mt-6">
-          {themeMode === 'cyberpunk' ? (
-            <TouchableOpacity
-              onPress={() => setShowSubmitModal(true)}
-              disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
-              style={{ alignSelf: 'center' }}
-            >
-              <Image 
-                source={require('../../../../assets/images/save-cyberpunk.png')} 
-                style={{ width: 40, height: 40 }}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              className={`py-3 px-4 rounded-lg ${
-                (answers.filter(answer => answer && answer.trim() !== '').length === questions.length && !isSubmitting) 
-                  ? themeMode === 'dark' 
-                    ? 'bg-blue-600' 
-                    : 'bg-[#8B5CF6]'
-                  : 'bg-gray-400'
-              }`}
-              disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
-              onPress={handleSubmit}
-            >
-              <Text className="text-white text-center font-semibold">
-                {isLoadingUser ? 'Loading...' : isSubmitting ? 'Submitting...' : 'Submit Test'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        {!showExamNav && (
+          <View className="mt-6">
+            {themeMode === 'cyberpunk' ? (
+              <TouchableOpacity
+                onPress={() => setShowSubmitModal(true)}
+                disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
+                style={{ alignSelf: 'center' }}
+              >
+                <Image 
+                  source={require('../../../../assets/images/save-cyberpunk.png')} 
+                  style={{ width: 40, height: 40 }}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                className={`py-3 px-4 rounded-lg ${
+                  (answers.filter(answer => answer && answer.trim() !== '').length === questions.length && !isSubmitting) 
+                    ? themeMode === 'dark' 
+                      ? 'bg-blue-600' 
+                      : 'bg-[#8B5CF6]'
+                    : 'bg-gray-400'
+                }`}
+                disabled={isLoadingUser || answers.filter(answer => answer && answer.trim() !== '').length !== questions.length || isSubmitting}
+                onPress={handleSubmit}
+              >
+                <Text className="text-white text-center font-semibold">
+                  {isLoadingUser ? 'Loading...' : isSubmitting ? 'Submitting...' : 'Submit Test'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
-        {submitError && (
+        {!showExamNav && submitError && (
           <View className={`border rounded-lg p-4 mt-4 ${
             themeMode === 'cyberpunk' 
               ? 'bg-black border-red-400/30' 
@@ -839,17 +916,32 @@ export default function MultipleChoiceTestScreen() {
         )}
       </View>
       </ScrollView>
-      {/* Submit Confirmation Modal */}
-      <SubmitModal
-        visible={showSubmitModal}
-        onConfirm={() => {
-          setShowSubmitModal(false);
-          submitTest();
-        }}
-        onCancel={() => setShowSubmitModal(false)}
-        testName={testData?.test_name || testData?.title || 'Test'}
-      />
-      <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
+      {showExamNav && (
+        <ExamNavFooter
+          themeMode={themeMode}
+          loading={navLoading}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          onPressPrev={navigatePrev}
+          onPressNext={navigateNext}
+          onPressReview={navigateReview}
+        />
+      )}
+      {!showExamNav && (
+        <>
+          {/* Submit Confirmation Modal */}
+          <SubmitModal
+            visible={showSubmitModal}
+            onConfirm={() => {
+              setShowSubmitModal(false);
+              submitTest();
+            }}
+            onCancel={() => setShowSubmitModal(false)}
+            testName={testData?.test_name || testData?.title || 'Test'}
+          />
+          <LoadingModal visible={isSubmitting} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
+        </>
+      )}
     </View>
   );
 }

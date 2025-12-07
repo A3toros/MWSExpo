@@ -1,6 +1,6 @@
 /** @jsxImportSource nativewind */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, Alert, ActivityIndicator, ScrollView, TouchableOpacity, Dimensions, Image, AppState } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { View, Text, Alert, ActivityIndicator, ScrollView, TouchableOpacity, Dimensions, Image, AppState, Modal } from 'react-native';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -16,10 +16,11 @@ import { useAppDispatch, useAppSelector } from '../../../../src/store';
 import { api, getSubmissionMethod } from '../../../../src/services/apiClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import TestHeader from '../../../../src/components/TestHeader';
+import ExamTestHeader from '../../../../src/components/ExamTestHeader';
+import { useExamTimer } from '../../../../src/hooks/useExamTimer';
 import ProgressTracker from '../../../../src/components/ProgressTracker';
-import DrawingCanvas from '../../../../src/components/DrawingCanvas';
-import DrawingControls from '../../../../src/components/DrawingControls';
-import { convertAndroidDrawingToWebFormat, skiaToKonvaJSON } from '../../../../src/utils/SkiaDrawingToKonvaJSON';
+import FullscreenCanvas, { FullscreenCanvasSnapshot } from '../../../../src/components/FullscreenCanvas';
+import { Canvas as SkiaCanvas, Path as SkiaPath, Line as SkiaLine, Rect as SkiaRect, Circle as SkiaCircle, Text as SkiaText, Skia, useFont } from '@shopify/react-native-skia';
 import { academicCalendarService } from '../../../../src/services/AcademicCalendarService';
 import { SubmitModal } from '../../../../src/components/modals';
 import { LoadingModal } from '../../../../src/components/modals/LoadingModal';
@@ -27,22 +28,293 @@ import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { getRetestAssignmentId, markTestCompleted } from '../../../../src/utils/retestUtils';
 import { useAntiCheatingDetection } from '../../../../src/hooks/useAntiCheatingDetection';
+import type { CanvasTool, Line, LegacyTextBox } from '../../../../src/types/drawing';
+import { useExamNavigation } from '../../../../src/hooks/useExamNavigation';
+import ExamNavFooter from '../../../../src/components/ExamNavFooter';
+
+const previewFontSource = require('../../../../assets/fonts/SpaceMono-Regular.ttf');
+
+interface DrawingPreviewProps {
+  paths: any[];
+  width: number;
+  height: number;
+  themeMode: string;
+}
+
+const buildPreviewPath = (points: any[]) => {
+  const path = Skia.Path.Make();
+  if (points?.length) {
+    path.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      path.lineTo(points[i].x, points[i].y);
+    }
+  }
+  return path;
+};
+
+const DrawingPreview: React.FC<DrawingPreviewProps> = ({ paths = [], width, height, themeMode }) => {
+  const font = useFont(previewFontSource, 16);
+  const hasPaths = Array.isArray(paths) && paths.length > 0;
+  const effectiveWidth = typeof width === 'number' ? width : screenWidth - 64;
+  const canvasWidth = Math.max(0, effectiveWidth - 32);
+  const containerStyles = themeMode === 'cyberpunk'
+    ? { backgroundColor: '#050505', borderColor: 'rgba(45, 212, 191, 0.4)' }
+    : themeMode === 'dark'
+      ? { backgroundColor: '#111827', borderColor: '#374151' }
+      : { backgroundColor: '#ffffff', borderColor: '#e5e7eb' };
+  const helperTextColor = themeMode === 'cyberpunk'
+    ? '#22d3ee'
+    : themeMode === 'dark'
+      ? '#e5e7eb'
+      : '#1f2937';
+  const placeholderColor = themeMode === 'cyberpunk'
+    ? '#14b8a6'
+    : themeMode === 'dark'
+      ? '#9ca3af'
+      : '#9ca3af';
+
+  return (
+    <View style={[{ borderWidth: 1, borderRadius: 20, padding: 16, width: effectiveWidth, marginTop: 12 }, containerStyles]}>
+      <View style={{ borderRadius: 12, overflow: 'hidden', alignItems: 'center' }}>
+        <View style={{ width: canvasWidth, height, position: 'relative' }}>
+          <SkiaCanvas style={{ width: canvasWidth, height, backgroundColor: '#f9fafb' }}>
+            {hasPaths && paths.map((item: any, index: number) => {
+              if (Array.isArray(item)) {
+                const path = buildPreviewPath(item);
+                const isEraserStroke = item[0]?.tool === 'eraser';
+                return (
+                  <SkiaPath
+                    key={`preview-stroke-${index}`}
+                    path={path}
+                    color={isEraserStroke ? '#f9fafb' : (item[0]?.color || '#111827')}
+                    style="stroke"
+                    strokeWidth={isEraserStroke ? (item[0]?.thickness || 1) * 7 : (item[0]?.thickness || 1)}
+                    strokeCap="round"
+                    strokeJoin="round"
+                  />
+                );
+              }
+              if (item?.type === 'line') {
+                return (
+                  <SkiaLine
+                    key={`preview-line-${index}`}
+                    p1={{ x: item.startX, y: item.startY }}
+                    p2={{ x: item.endX, y: item.endY }}
+                    color={item.color || '#111827'}
+                    style="stroke"
+                    strokeWidth={item.thickness || 1}
+                  />
+                );
+              }
+              if (item?.type === 'rectangle' || item?.type === 'textBox') {
+                const rectWidth = Math.abs(item.endX - item.startX);
+                const rectHeight = Math.abs(item.endY - item.startY);
+                const rectX = Math.min(item.startX, item.endX);
+                const rectY = Math.min(item.startY, item.endY);
+                return (
+                  <SkiaRect
+                    key={`preview-rect-${index}`}
+                    x={rectX}
+                    y={rectY}
+                    width={rectWidth}
+                    height={rectHeight}
+                    color={item.color || '#111827'}
+                    style="stroke"
+                    strokeWidth={item.thickness || 1}
+                  />
+                );
+              }
+              if (item?.type === 'circle') {
+                const centerX = (item.startX + item.endX) / 2;
+                const centerY = (item.startY + item.endY) / 2;
+                const radius = Math.sqrt(
+                  Math.pow(item.endX - item.startX, 2) + Math.pow(item.endY - item.startY, 2)
+                ) / 2;
+                return (
+                  <SkiaCircle
+                    key={`preview-circle-${index}`}
+                    cx={centerX}
+                    cy={centerY}
+                    r={radius}
+                    color={item.color || '#111827'}
+                    style="stroke"
+                    strokeWidth={item.thickness || 1}
+                  />
+                );
+              }
+              if (item?.type === 'text' && font) {
+                return (
+                  <SkiaText
+                    key={`preview-text-${index}`}
+                    x={item.x}
+                    y={item.y}
+                    text={item.text}
+                    color={item.color || '#111827'}
+                    font={font}
+                  />
+                );
+              }
+              return null;
+            })}
+          </SkiaCanvas>
+          {!hasPaths && (
+            <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: placeholderColor, fontSize: 15 }}>
+                No strokes yet - open the full canvas to start
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+      <Text style={{ marginTop: 12, textAlign: 'center', fontSize: 16, fontWeight: '600', color: helperTextColor }}>
+        Full canvas preview (updates automatically)
+      </Text>
+    </View>
+  );
+};
+
+const generateLineId = (() => {
+  let seed = 0;
+  return (prefix = 'line') => {
+    seed += 1;
+    return `${prefix}-${Date.now()}-${seed}`;
+  };
+})();
+
+const convertPathsToFullscreenData = (paths: any[]): { lines: Line[]; textBoxes: LegacyTextBox[] } => {
+  const lines: Line[] = [];
+  const textBoxes: LegacyTextBox[] = [];
+
+  paths?.forEach((entry, index) => {
+    if (Array.isArray(entry) && entry.length > 0) {
+      const firstPoint = entry[0];
+      lines.push({
+        id: generateLineId('stroke'),
+        tool: firstPoint.tool || 'pencil',
+        color: firstPoint.color || '#111827',
+        thickness: firstPoint.thickness || 2,
+        points: entry.map((pt: any) => ({ x: pt.x, y: pt.y })),
+      });
+      return;
+    }
+
+    if (entry?.type === 'text' && entry?.text) {
+      const fontSize = entry.fontSize || 24;
+      const width = Math.max(fontSize * 4, (entry.text.length || 1) * fontSize * 0.6);
+      const height = fontSize * 1.6;
+      textBoxes.push({
+        id: index + 1,
+        x: entry.x || 0,
+        y: (entry.y || 0) - fontSize,
+        width,
+        height,
+        text: entry.text,
+        fontSize,
+        color: entry.color || '#111827',
+        isEditing: false,
+      });
+      return;
+    }
+
+    if (entry?.type === 'line' || entry?.type === 'rectangle' || entry?.type === 'circle') {
+      const shape = entry.type === 'circle' ? 'ellipse' : entry.type;
+      const startX = entry.startX ?? entry.x1 ?? 0;
+      const startY = entry.startY ?? entry.y1 ?? 0;
+      const endX = entry.endX ?? entry.x2 ?? startX;
+      const endY = entry.endY ?? entry.y2 ?? startY;
+      lines.push({
+        id: generateLineId('shape'),
+        tool: shape === 'ellipse' ? 'ellipse' : shape,
+        color: entry.color || '#111827',
+        thickness: entry.thickness || 2,
+        points: [
+          { x: startX, y: startY },
+          { x: endX, y: endY },
+        ],
+        shape: shape === 'ellipse' ? 'ellipse' : (shape as 'line' | 'rectangle'),
+        bounds: {
+          x1: startX,
+          y1: startY,
+          x2: endX,
+          y2: endY,
+        },
+      });
+    }
+  });
+
+  return { lines, textBoxes };
+};
+
+const convertSnapshotToPaths = (snapshot: FullscreenCanvasSnapshot): any[] => {
+  const paths: any[] = [];
+
+  snapshot.lines?.forEach((line) => {
+    const shapeType = line.shape || (line.tool === 'ellipse' ? 'ellipse' : undefined);
+    if (!shapeType && (line.tool === 'pencil' || line.tool === 'eraser' || !line.shape)) {
+      // Format: array of points with x, y, color, thickness (NO tool field - web app doesn't expect it)
+      const stroke = line.points.map((pt) => ({
+        x: Math.round(pt.x * 100) / 100, // Round to 2 decimals like web app
+        y: Math.round(pt.y * 100) / 100,
+        color: line.tool === 'eraser' ? '#fafafa' : line.color,
+        thickness: line.thickness,
+        // NO tool field - web app format doesn't include it
+      }));
+      paths.push(stroke);
+      return;
+    }
+
+    const bounds = line.bounds || {
+      x1: line.points[0]?.x || 0,
+      y1: line.points[0]?.y || 0,
+      x2: line.points[line.points.length - 1]?.x || line.points[0]?.x || 0,
+      y2: line.points[line.points.length - 1]?.y || line.points[0]?.y || 0,
+    };
+
+    paths.push({
+      type: shapeType === 'ellipse' ? 'circle' : shapeType,
+      startX: bounds.x1,
+      startY: bounds.y1,
+      endX: bounds.x2,
+      endY: bounds.y2,
+      color: line.color,
+      thickness: line.thickness,
+    });
+  });
+
+  snapshot.textBoxes?.forEach((box) => {
+    paths.push({
+      type: 'rectangle',
+      startX: box.x,
+      startY: box.y,
+      endX: box.x + box.width,
+      endY: box.y + box.height,
+      color: box.color,
+      thickness: 1,
+    });
+    paths.push({
+      type: 'text',
+      x: box.x,
+      y: box.y + box.fontSize,
+      text: box.text,
+      color: box.color,
+      fontSize: box.fontSize,
+    });
+  });
+
+  return paths;
+};
 
 // Function to decode JWT and extract student_id
 const getStudentIdFromToken = async (): Promise<string | null> => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
-    console.log('🔑 Raw token exists:', !!token);
     if (!token) return null;
     
     // Decode JWT payload (base64 decode the middle part)
     const parts = token.split('.');
-    console.log('🔑 Token parts count:', parts.length);
     if (parts.length !== 3) return null;
     
     const payload = JSON.parse(atob(parts[1]));
-    console.log('🔑 JWT payload:', payload);
-    console.log('🔑 Extracted student_id from sub:', payload.sub);
     return payload.sub || null;
   } catch (error) {
     console.error('Error decoding JWT:', error);
@@ -51,7 +323,10 @@ const getStudentIdFromToken = async (): Promise<string | null> => {
 };
 
 export default function DrawingTestScreen() {
-  const { testId } = useLocalSearchParams();
+  const { testId, exam, examId } = useLocalSearchParams();
+  const inExamContext = useMemo(() => exam === '1' && !!examId, [exam, examId]);
+  const submitAllowed = !inExamContext;
+  const showExamNav = inExamContext && !!examId;
   const dispatch = useAppDispatch();
   const user = useAppSelector((state: any) => state.auth.user);
   const { themeMode } = useTheme();
@@ -68,6 +343,7 @@ export default function DrawingTestScreen() {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [isSubmittingToAPI, setIsSubmittingToAPI] = useState(false);
   const [timeElapsed, setTimeElapsed] = useState(0);
+  const [showFullscreenCanvas, setShowFullscreenCanvas] = useState(false);
 
   // Anti-cheating detection hook
   const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId || ''));
@@ -75,8 +351,25 @@ export default function DrawingTestScreen() {
     studentId: studentId || '',
     testType: 'drawing',
     testId: testIdStr,
-    enabled: !!studentId && !!testId,
+    enabled: !!studentId && !!testId && !inExamContext,
   });
+  const {
+    loading: navLoading,
+    currentIndex: examTestIndex,
+    total: examTestsTotal,
+    navigatePrev,
+    navigateNext,
+    navigateReview,
+    examName,
+    totalMinutes,
+    cachedAnswers,
+  } = useExamNavigation({
+    examId,
+    currentTestId: testId,
+    currentTestType: 'drawing',
+    enabled: showExamNav,
+  });
+  const examTimeRemaining = useExamTimer({ examId, studentId, totalMinutes });
   
   // Timer refs to prevent re-initialization
   const timerInitializedRef = useRef<boolean>(false);
@@ -85,29 +378,14 @@ export default function DrawingTestScreen() {
   const timerStartedAtRef = useRef<string>('');
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Debug user state
-  useEffect(() => {
-    console.log('👤 User state changed:', user ? 'user object exists' : 'user is null');
-    if (user) {
-      console.log('👤 User details:', { student_id: user.student_id, id: user.id, name: user.name });
-    }
-  }, [user]);
-
   // Load student_id from JWT token
   useEffect(() => {
     const loadStudentId = async () => {
-      console.log('🔑 Starting to load student_id from JWT...');
       const id = await getStudentIdFromToken();
-      console.log('🔑 Loaded student_id from JWT:', id);
       setStudentId(id);
     };
     loadStudentId();
   }, []);
-
-  // Debug studentId state changes
-  useEffect(() => {
-    console.log('🔑 StudentId state changed to:', studentId);
-  }, [studentId]);
   
   // Multiple question support
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -115,45 +393,77 @@ export default function DrawingTestScreen() {
   const [currentQuestionPaths, setCurrentQuestionPaths] = useState<any[]>([]); // Current question's drawing paths
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false); // Flag to prevent interference during question loading
   
-  // Drawing tools state
-  const [currentTool, setCurrentTool] = useState('pencil');
-  const [currentColor, setCurrentColor] = useState('#000000');
-  const [currentThickness, setCurrentThickness] = useState(2);
-  const sliderWidthRef = React.useRef<number>(0);
-  const [showColorPicker, setShowColorPicker] = useState(false);
-  
-  // Drawing state for scroll prevention
-  const [isDrawing, setIsDrawing] = useState(false);
-  
-  // Gesture state tracking
-  const [isGestureActive, setIsGestureActive] = useState(false);
-  
-  // Scroll state management
-  const [isScrolling, setIsScrolling] = useState(false);
-  
-  // Drawing controls state
-  const [drawingControls, setDrawingControls] = useState<{
-    undo: () => void;
-    redo: () => void;
-    reset: () => void;
-    zoomIn: () => void;
-    zoomOut: () => void;
-    canUndo: boolean;
-    canRedo: boolean;
-    zoomLevel: number;
-  } | null>(null);
-  
-  // Primary palette (8 colors, used in compact picker)
-  const colors = [
-    '#000000', // black
-    '#FF0000', // red
-    '#00FF00', // green
-    '#0000FF', // blue
-    '#FFFF00', // yellow
-    '#FF00FF', // magenta
-    '#00FFFF', // cyan
-    '#FFA500', // orange
-  ];
+  // Fullscreen canvas seed data (kept stable while modal is open)
+  const [fullscreenInitialData, setFullscreenInitialData] = useState<{ lines: Line[]; textBoxes: LegacyTextBox[] }>(() => convertPathsToFullscreenData([]));
+  const [fullscreenPrefs, setFullscreenPrefs] = useState<{ tool: CanvasTool; color: string; thickness: number }>({
+    tool: 'pencil',
+    color: '#111827',
+    thickness: 4,
+  });
+
+  // Persist per-test answers into exam-level key when in exam context
+  useEffect(() => {
+    if (!inExamContext || !studentId || !examId || !testId || !questions.length) return;
+    const payload: Record<string | number, any> = {};
+    answers.forEach((ans, idx) => {
+      const q = questions[idx];
+      const qId = q?.question_id || q?.id || idx;
+      const formatted = convertPathsToFullscreenData(Array.isArray(ans) ? ans : []);
+      const lines = (formatted.lines || []).map((line) =>
+        line.points.map((pt) => ({
+          x: pt.x,
+          y: pt.y,
+          color: line.tool === 'eraser' ? '#fafafa' : line.color,
+          thickness: line.thickness,
+        })),
+      );
+      payload[qId] = { lines, textBoxes: formatted.textBoxes || [] };
+    });
+    const key = `exam_answer_${studentId}_${examId}_${testId}_drawing`;
+    AsyncStorage.setItem(key, JSON.stringify(payload)).catch(() => {});
+  }, [answers, inExamContext, studentId, examId, testId, questions]);
+
+  // Prefill drawing answers from cached exam data when in exam context
+  useEffect(() => {
+    if (!showExamNav || !studentId || !examId || !testId) return;
+    const key = `exam_answer_${studentId}_${examId}_${testId}_drawing`;
+    const preloaded = cachedAnswers?.[key];
+    const restoreFromPayload = (payload: any) => {
+      if (!payload || typeof payload !== 'object') return;
+      const restored: any[] = [];
+      questions.forEach((q, idx) => {
+        const qId = q?.question_id || q?.id || idx;
+        const entry = payload[qId];
+        if (entry) {
+          const lines = entry.lines || [];
+          const textBoxes = entry.textBoxes || [];
+          restored[idx] = { lines, textBoxes };
+        }
+      });
+      setAnswers(restored);
+    };
+    if (preloaded) {
+      restoreFromPayload(preloaded);
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          restoreFromPayload(parsed);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [showExamNav, studentId, examId, testId, cachedAnswers, questions]);
+
+  useEffect(() => {
+    if (!showFullscreenCanvas) {
+      setFullscreenInitialData(convertPathsToFullscreenData(currentQuestionPaths));
+    }
+  }, [showFullscreenCanvas, currentQuestionPaths]);
 
 
   // Check if test is already completed (web app pattern)
@@ -168,7 +478,6 @@ export default function DrawingTestScreen() {
       
       // If retest is available, allow access even if test is completed
       if (hasRetest === 'true') {
-        console.log('🎓 Retest available - allowing access even if test is completed');
         return false; // Don't block retests
       }
       
@@ -193,21 +502,15 @@ export default function DrawingTestScreen() {
 
   // Load saved drawing data for current question
   const loadCurrentQuestionDrawing = useCallback(async () => {
-    console.log('🔄 Loading drawing for question:', currentQuestionIndex);
-    console.log('🔄 Student ID from JWT:', studentId, 'testId:', testId);
-    console.log('🔄 About to set isLoadingQuestion to true');
     setIsLoadingQuestion(true);
     
     if (studentId && testId) {
       const storageKey = `drawing_${studentId}_${testId}_${currentQuestionIndex}`;
-      console.log('🔄 Storage key:', storageKey);
       try {
         const savedData = await AsyncStorage.getItem(storageKey);
-        console.log('📁 Saved data for question', currentQuestionIndex, ':', savedData ? 'exists' : 'none');
         
         if (savedData) {
           const parsedData = JSON.parse(savedData);
-          console.log('📦 Parsed data structure:', Object.keys(parsedData));
           
           // Handle new JSON format with root.children structure
           if (parsedData.root && parsedData.root.children && parsedData.root.children[0] && parsedData.root.children[0].children) {
@@ -215,13 +518,10 @@ export default function DrawingTestScreen() {
               try {
                 return JSON.parse(child.text);
               } catch (e) {
-                console.error('Error parsing drawing path:', e);
                 return null;
               }
             }).filter((path: any) => path !== null);
             
-            console.log('🎨 Setting currentQuestionPaths to:', drawingPaths.length, 'paths');
-            console.log('🎨 First path sample:', drawingPaths[0]);
             setCurrentQuestionPaths(drawingPaths);
             
             // Update answers array
@@ -232,8 +532,6 @@ export default function DrawingTestScreen() {
             });
           } else {
             // Fallback: try to parse as old format
-            console.log('🎨 Setting currentQuestionPaths to (old format):', parsedData.length, 'paths');
-            console.log('🎨 First path sample (old format):', parsedData[0]);
             setCurrentQuestionPaths(parsedData);
             setAnswers(prevAnswers => {
               const newAnswers = [...prevAnswers];
@@ -243,19 +541,15 @@ export default function DrawingTestScreen() {
           }
         } else {
           // No saved data for this question, reset canvas
-          console.log('🎨 No saved data, setting currentQuestionPaths to empty array');
           setCurrentQuestionPaths([]);
-          console.log('🎨 currentQuestionPaths set to empty array for question:', currentQuestionIndex);
         }
       } catch (error) {
-        console.error('Error loading saved drawing data for question:', currentQuestionIndex, error);
         setCurrentQuestionPaths([]);
       }
     }
     
     // Add a small delay to ensure the canvas has time to initialize
     setTimeout(() => {
-      console.log('✅ Finished loading question', currentQuestionIndex, 'isLoadingQuestion set to false');
       setIsLoadingQuestion(false);
     }, 100);
   }, [currentQuestionIndex, studentId, testId]);
@@ -315,37 +609,19 @@ export default function DrawingTestScreen() {
 
   // Load drawing data when question changes
   useEffect(() => {
-    console.log('🔄 Question changed to:', currentQuestionIndex, 'Total questions:', questions.length, 'Student ID available:', !!studentId);
     if (questions.length > 0 && studentId) {
-      console.log('🔄 Calling loadCurrentQuestionDrawing for question:', currentQuestionIndex);
       loadCurrentQuestionDrawing();
     } else if (questions.length > 0 && !studentId) {
-      console.log('🔄 Student ID not available yet, resetting canvas to empty for question:', currentQuestionIndex);
       setCurrentQuestionPaths([]);
     }
   }, [currentQuestionIndex, loadCurrentQuestionDrawing, questions.length, studentId]);
 
   // Load drawing data when studentId becomes available
   useEffect(() => {
-    console.log('🔄 Student ID state changed:', studentId ? 'available' : 'not available');
     if (studentId && questions.length > 0) {
-      console.log('🔄 Student ID became available, loading drawing for question:', currentQuestionIndex);
       loadCurrentQuestionDrawing();
     }
   }, [studentId, questions.length, currentQuestionIndex, loadCurrentQuestionDrawing]);
-
-  // Debug log for DrawingCanvas rendering
-  useEffect(() => {
-    console.log('🎨 Rendering DrawingCanvas for question', currentQuestionIndex, 'with paths:', currentQuestionPaths.length, 'isLoading:', isLoadingQuestion);
-  }, [currentQuestionIndex, currentQuestionPaths.length, isLoadingQuestion]);
-
-  // Debug log for currentQuestionPaths changes
-  useEffect(() => {
-    console.log('🔄 currentQuestionPaths changed for question', currentQuestionIndex, ':', currentQuestionPaths.length, 'paths');
-    if (currentQuestionPaths.length > 0) {
-      console.log('🔄 First path in currentQuestionPaths:', currentQuestionPaths[0]);
-    }
-  }, [currentQuestionPaths, currentQuestionIndex]);
 
   // Save drawing data
   const saveDrawingData = useCallback(async (paths: any[]) => {
@@ -354,30 +630,13 @@ export default function DrawingTestScreen() {
     }
   }, [studentId, testId]);
 
-  // Handle gesture state change
-  const handleGestureStateChange = useCallback((isActive: boolean) => {
-    setIsGestureActive(isActive);
-  }, []);
-
-  // Handle scroll state changes
-  const handleScrollBegin = useCallback(() => {
-    setIsScrolling(true);
-  }, []);
-
-  const handleScrollEnd = useCallback(() => {
-    setIsScrolling(false);
-  }, []);
-
   // Handle drawing change - store per question
   const handleDrawingChange = useCallback((paths: any[]) => {
     // Don't update if we're still loading a question
     if (isLoadingQuestion) {
-      console.log('🚫 Ignoring drawing change during question loading');
       return;
     }
-    
-    console.log('🎨 Drawing change for question', currentQuestionIndex, ':', paths.length, 'paths');
-    
+
     // Defer state updates to avoid setState during render
     setTimeout(() => {
       setDrawingPaths(paths);
@@ -394,9 +653,6 @@ export default function DrawingTestScreen() {
     // Save current question's drawing data in the correct JSON format
     if (studentId && testId) {
       const storageKey = `drawing_${studentId}_${testId}_${currentQuestionIndex}`;
-      console.log('💾 Saving drawing for question', currentQuestionIndex, 'with', paths.length, 'paths to key:', storageKey);
-      console.log('💾 Paths sample:', paths.slice(0, 2));
-      console.log('💾 Text elements in paths:', paths.filter(p => p.type === 'text'));
       
       // Save in the same format that submission expects
       const drawingData = {
@@ -432,6 +688,45 @@ export default function DrawingTestScreen() {
       AsyncStorage.setItem(storageKey, JSON.stringify(drawingData));
     }
   }, [currentQuestionIndex, studentId, testId, isLoadingQuestion]);
+
+  const handleOpenFullscreen = useCallback(() => {
+    setFullscreenInitialData(convertPathsToFullscreenData(currentQuestionPaths));
+    // Ensure tool is always pencil (brush), never pan when opening
+    setFullscreenPrefs((prev) => ({
+      ...prev,
+      tool: prev.tool === 'pan' ? 'pencil' : prev.tool,
+    }));
+    setShowFullscreenCanvas(true);
+  }, [currentQuestionPaths]);
+
+  const handleFullscreenChange = useCallback((snapshot: FullscreenCanvasSnapshot) => {
+    // Don't persist pan tool - keep current tool or default to pencil
+    setFullscreenPrefs((prev) => ({
+      tool: (snapshot.tool && snapshot.tool !== 'pan') ? snapshot.tool : prev.tool !== 'pan' ? prev.tool : 'pencil',
+      color: snapshot.color || prev.color,
+      thickness: snapshot.thickness || prev.thickness,
+    }));
+    handleDrawingChange(convertSnapshotToPaths(snapshot));
+  }, [handleDrawingChange]);
+
+  const handleFullscreenExit = useCallback((snapshot?: FullscreenCanvasSnapshot) => {
+    if (snapshot) {
+      // Reset tool to pencil (brush) when exiting - don't persist pan tool
+      setFullscreenPrefs((prev) => ({
+        tool: 'pencil', // Always reset to brush/pencil, never persist pan
+        color: snapshot.color || prev.color,
+        thickness: snapshot.thickness || prev.thickness,
+      }));
+      handleDrawingChange(convertSnapshotToPaths(snapshot));
+    } else {
+      // Even if no snapshot, reset tool to pencil
+      setFullscreenPrefs((prev) => ({
+        ...prev,
+        tool: 'pencil',
+      }));
+    }
+    setShowFullscreenCanvas(false);
+  }, [handleDrawingChange]);
 
   // Question navigation with confirmation
   const handleNextQuestion = useCallback(() => {
@@ -566,31 +861,24 @@ export default function DrawingTestScreen() {
 
   // Submit test
   const handleSubmit = useCallback(() => {
-    console.log('🔘 handleSubmit called');
-    console.log('🔘 testData:', testData);
-    console.log('🔘 questions.length:', questions.length);
-    
+    if (!submitAllowed) return;
     if (!testData || !questions.length) {
-      console.log('❌ Missing test data or questions');
       Alert.alert('Error', 'Missing required data for submission');
       return;
     }
 
     // Allow submission even without drawing data - will submit empty structures
     // Show confirmation modal
-    console.log('🔘 Showing confirmation modal');
     setShowSubmitModal(true);
-  }, [testData, questions, testId, user]);
+  }, [testData, questions, testId, user, submitAllowed]);
 
   // Actual submit function
   const performSubmit = useCallback(async () => {
-    console.log('🚀 performSubmit called');
-    console.log('🚀 testData:', testData);
-    console.log('🚀 questions.length:', questions.length);
-    console.log('🚀 drawingPaths.length:', drawingPaths.length);
-    
+    if (!submitAllowed) {
+      setShowSubmitModal(false);
+      return;
+    }
     if (!testData || !questions.length) {
-      console.log('❌ Missing required data for submission');
       Alert.alert('Error', 'Missing required data for submission');
       return;
     }
@@ -598,7 +886,6 @@ export default function DrawingTestScreen() {
     // Don't check drawingPaths.length here - drawings are stored in AsyncStorage per question
     // The submission will load from AsyncStorage and check if there's actual drawing data
 
-    console.log('✅ Starting submission process');
     setIsSubmittingToAPI(true);
     setSubmitError(null);
 
@@ -611,134 +898,111 @@ export default function DrawingTestScreen() {
         const userData = await AsyncStorage.getItem('user');
         const userFromStorage = userData ? JSON.parse(userData) : null;
         studentId = userFromStorage?.student_id || userFromStorage?.id;
-        console.log('Drawing RN: userFromStorage:', userFromStorage);
       }
       
       if (!studentId) {
         // Fallback to Redux state
         studentId = user?.student_id || (user as any)?.id;
-        console.log('Drawing RN: user from Redux:', user);
       }
       
-      console.log('Drawing RN: studentId from token/AsyncStorage:', studentId);
-      
       if (!studentId) {
-        console.log('Drawing RN: No student ID available');
         Alert.alert('Error', 'Missing student ID');
         return;
       }
 
-      console.log('📊 Collecting drawing data from AsyncStorage...');
       // Collect drawing data per question in the correct format
       const allDrawingData: string[] = [];
       
       for (let i = 0; i < questions.length; i++) {
-        console.log(`📊 Loading data for question ${i}...`);
         try {
           const storageKey = `drawing_${studentId}_${testId}_${i}`;
-          console.log(`📊 Storage key: ${storageKey}`);
           const savedData = await AsyncStorage.getItem(storageKey);
-          console.log(`📊 Saved data exists for question ${i}:`, !!savedData);
           
           if (savedData) {
             const parsedData = JSON.parse(savedData);
-            console.log(`📊 Parsed data structure for question ${i}:`, Object.keys(parsedData));
             
             // Extract drawing paths from the saved format
             let drawingPaths = [];
             if (parsedData.root && parsedData.root.children && parsedData.root.children[0] && parsedData.root.children[0].children) {
-              console.log(`📊 Using new format for question ${i}`);
               drawingPaths = parsedData.root.children[0].children.map((child: any) => {
                 try {
                   return JSON.parse(child.text);
                 } catch (e) {
-                  console.error('Error parsing drawing path:', e);
                   return null;
                 }
               }).filter((path: any) => path !== null);
             } else if (Array.isArray(parsedData)) {
-              console.log(`📊 Using old format for question ${i}`);
               drawingPaths = parsedData;
             }
             
-            console.log(`📊 Found ${drawingPaths.length} drawing paths for question ${i}`);
-            console.log(`📊 Drawing paths sample:`, drawingPaths.slice(0, 2));
-            console.log(`📊 Text elements in drawingPaths:`, drawingPaths.filter((path: any) => path.type === 'text'));
-            
             // Format as JSON string with "lines" and "textBoxes" structure (web app format)
             if (drawingPaths.length > 0) {
-              // Separate strokes from text elements - FIXED FILTERING
-              console.log(`📊 All drawing paths:`, drawingPaths.map((p: any) => ({ type: p.type, hasText: !!p.text })));
-              const strokes = drawingPaths.filter((path: any) => {
-                const isText = path.type === 'text';
-                console.log(`📊 Path type: ${path.type}, isText: ${isText}, included in strokes: ${!isText}`);
-                return path.type !== 'text';
+              // Separate strokes from text elements
+              const strokes = drawingPaths.filter((path: any) => path.type !== 'text');
+              const textBoxes = drawingPaths.filter((path: any) => path.type === 'text' && path.text);
+              
+              // Clean strokes: remove 'tool' field from points and ensure correct format
+              // Web app expects: lines = [[{x, y, color, thickness}, ...], ...] (array of arrays)
+              const cleanedStrokes = strokes.map((stroke: any) => {
+                if (Array.isArray(stroke)) {
+                  // Stroke is already an array of points - remove 'tool' field
+                  return stroke.map((point: any) => {
+                    const { tool, ...pointWithoutTool } = point;
+                    return {
+                      x: Math.round(point.x * 100) / 100, // Round to 2 decimals like web app
+                      y: Math.round(point.y * 100) / 100,
+                      color: point.color || '#000000',
+                      thickness: point.thickness || 2,
+                    };
+                  });
+                }
+                // Shape object (line, rectangle, ellipse) - keep as is for now
+                return stroke;
               });
-              const textBoxes = drawingPaths.filter((path: any) => {
-                const isText = path.type === 'text' && path.text;
-                console.log(`📊 Path type: ${path.type}, hasText: ${!!path.text}, included in textBoxes: ${isText}`);
-                return path.type === 'text' && path.text;
-              });
-              console.log(`📊 Text elements found after filtering:`, textBoxes);
+              
               const formattedTextBoxes = textBoxes.map((textElement: any) => ({
-                id: Date.now() + Math.random(), // Generate unique ID
+                id: Date.now() + Math.random(),
                 x: textElement.x,
                 y: textElement.y,
-                width: 150, // Default width
-                height: 60, // Default height
+                width: 150,
+                height: 60,
                 text: textElement.text,
                 fontSize: textElement.fontSize || 14,
                 color: textElement.color,
                 isEditing: false
               }));
-              console.log(`📊 Formatted text boxes:`, formattedTextBoxes);
 
+              // Format exactly as web app expects: {"lines":[[...points...]],"textBoxes":[]}
               const formattedData = {
-                lines: strokes,
+                lines: cleanedStrokes, // Array of arrays (each inner array is a stroke/path)
                 textBoxes: formattedTextBoxes
               };
               const jsonString = JSON.stringify(formattedData);
               allDrawingData.push(jsonString);
-              console.log(`📊 Question ${i} formatted as:`, jsonString);
-              console.log(`📊 Question ${i} has ${strokes.length} strokes and ${textBoxes.length} text boxes`);
-              console.log(`📊 Question ${i} strokes:`, strokes);
-              console.log(`📊 Question ${i} textBoxes:`, formattedTextBoxes);
             } else {
               // Empty question - add empty structure
               allDrawingData.push('{"lines":[],"textBoxes":[]}');
-              console.log(`📊 Question ${i} has no data, added empty structure`);
             }
           } else {
             // No saved data for this question
             allDrawingData.push('{"lines":[],"textBoxes":[]}');
-            console.log(`📊 Question ${i} has no saved data, added empty structure`);
           }
         } catch (error) {
-          console.error(`Error loading drawing data for question ${i}:`, error);
           // Add empty structure for failed questions
           allDrawingData.push('{"lines":[],"textBoxes":[]}');
         }
       }
       
-      console.log('📊 Total questions to submit:', allDrawingData.length);
-      console.log('📊 Final submission data:', allDrawingData);
-      console.log('📊 Sample drawing data format:', allDrawingData.slice(0, 2));
-      
       // Prepare submission data
-      console.log('📝 Preparing submission data...');
-      
       // Get current academic period ID from academic calendar service
       await academicCalendarService.loadAcademicCalendar();
       const currentTerm = academicCalendarService.getCurrentTerm();
       const academic_period_id = currentTerm?.id;
       
       if (!academic_period_id) {
-        console.error('❌ No current academic period found');
         Alert.alert('Error', 'No current academic period found');
         return;
       }
-      
-      console.log('📅 Current academic period ID:', academic_period_id);
       
       // Get retest_assignment_id from AsyncStorage if this is a retest (web app pattern)
       const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
@@ -765,14 +1029,6 @@ export default function DrawingTestScreen() {
         retest_assignment_id: retestAssignmentId,
         parent_test_id: testId
       };
-      
-      console.log('📝 Submission data prepared:', {
-        test_id: submissionData.test_id,
-        test_name: submissionData.test_name,
-        student_id: submissionData.student_id,
-        answers_count: submissionData.answers.length,
-        questions_count: submissionData.maxScore
-      });
 
       // Populate answers_by_id with individual question data in correct format
       for (let i = 0; i < questions.length; i++) {
@@ -804,45 +1060,29 @@ export default function DrawingTestScreen() {
             submissionData.answers_by_id[questions[i].question_id] = { lines: [] };
           }
         } catch (error) {
-          console.error(`Error getting drawing data for question ${i}:`, error);
           submissionData.answers_by_id[questions[i].question_id] = { lines: [] };
         }
       }
 
-      console.log('📊 Submission data prepared:', {
-        totalQuestions: allDrawingData.length,
-        questionsCount: questions.length,
-        answersByIdKeys: Object.keys(submissionData.answers_by_id),
-        sampleAnswerFormat: allDrawingData[0]?.substring(0, 100) + '...'
-      });
-
       // Submit to API using the correct submission method
-      console.log('🌐 Submitting to API...');
       const submitMethod = getSubmissionMethod('drawing');
-      console.log('🌐 Submit method:', submitMethod);
-      console.log('🌐 Full submission data:', JSON.stringify(submissionData, null, 2));
       
       const response = await submitMethod(submissionData);
-      console.log('🌐 API Response:', response);
       
       if (response.data.success) {
         // Clear anti-cheating keys on successful submission
         await clearCheatingKeys();
-        console.log('✅ Submission successful!');
         // Mark test as completed and clear retest keys (web app pattern)
         const testIdStr = Array.isArray(testId) ? testId[0] : (typeof testId === 'string' ? testId : String(testId));
         await markTestCompleted(studentId, 'drawing', testIdStr);
-        console.log('✅ Marked test as completed and cleared retest keys');
         
         // Cache the test results immediately after successful submission (web app pattern)
         const cacheKey = `student_results_table_${studentId}`;
         await AsyncStorage.setItem(cacheKey, JSON.stringify(response.data));
-        console.log('🎓 Drawing test results cached with key:', cacheKey);
         
         // Clear progress key (like matching test)
         const progressKey = `test_progress_${studentId}_drawing_${testId}`;
         await AsyncStorage.removeItem(progressKey);
-        console.log('✅ Cleared progress key');
 
         // Clear saved drawing data for all questions
         const removePromises = [];
@@ -850,19 +1090,14 @@ export default function DrawingTestScreen() {
           removePromises.push(AsyncStorage.removeItem(`drawing_${studentId}_${testId}_${i}`));
         }
         await Promise.all(removePromises);
-        console.log('✅ Cleared saved drawing data');
 
         // Navigate directly to dashboard without popup
         router.back();
       } else {
-        console.log('❌ Submission failed:', response.data.error);
         throw new Error(response.data.error || 'Failed to submit test');
       }
 
     } catch (error: any) {
-      console.error('❌ Error submitting test:', error);
-      console.error('❌ Error message:', error.message);
-      console.error('❌ Error stack:', error.stack);
       setSubmitError(error.message || 'Failed to submit test');
       Alert.alert(
         'Submission Error',
@@ -873,69 +1108,43 @@ export default function DrawingTestScreen() {
         ]
       );
     } finally {
-      console.log('🏁 Submission process finished');
       setIsSubmittingToAPI(false);
     }
-  }, [testData, questions, drawingPaths, testId, user, caughtCheating, visibilityChangeTimes]);
+  }, [testData, questions, drawingPaths, testId, user, caughtCheating, visibilityChangeTimes, submitAllowed]);
 
   // Store performSubmit in ref to avoid dependency issues
   useEffect(() => {
     performSubmitRef.current = performSubmit;
   }, [performSubmit]);
 
-  // Timer effect - only start if test has timer enabled
+  // Timer effect - only start if test has timer enabled and NOT in exam context
   useEffect(() => {
-    console.log('⏰ [TIMER] Effect triggered', { 
-      hasTestData: !!testData, 
-      questionsLength: questions.length, 
-      studentId: studentId, // Use local studentId state, not user?.student_id
-      testId 
-    });
-    
-    if (!testData || !questions.length || !studentId) {
-      console.log('⏰ [TIMER] Skipping - missing requirements', { 
-        testData: !!testData, 
-        questions: questions.length, 
-        studentId: !!studentId 
-      });
+    if (!testData || !questions.length || !studentId || inExamContext) {
       return;
     }
     
-    // Only start timer if test has a time limit set
     const allowedTime = testData.allowed_time || testData.time_limit;
-    console.log('⏰ [TIMER] Checking timer', { allowedTime, timerInitialized: timerInitializedRef.current });
     
     if (allowedTime && allowedTime > 0) {
-      // Prevent multiple timer initializations
       if (timerInitializedRef.current) {
-        console.log('⏰ [TIMER] Already initialized - skipping');
         return;
       }
       
-      // CRITICAL: Set ref immediately before any async work to prevent race conditions
       timerInitializedRef.current = true;
-      console.log('⏰ [TIMER] Starting timer initialization', { allowedTime });
       
       const timerKey = `test_timer_${studentId}_drawing_${testId}`;
-      console.log('⏰ [TIMER] Timer key:', timerKey);
       
-      // Load cached timer state (only once)
       const loadTimerState = async () => {
-        console.log('⏰ [TIMER] Loading timer state...');
         try {
           const cached = await AsyncStorage.getItem(timerKey);
           const now = Date.now();
           if (cached) {
-            console.log('⏰ [TIMER] Found cached timer state');
             const parsed = JSON.parse(cached);
             const drift = Math.floor((now - new Date(parsed.lastTickAt).getTime()) / 1000);
             const remaining = Math.max(0, Number(parsed.remainingSeconds || allowedTime) - Math.max(0, drift));
-            console.log('⏰ [TIMER] Cached state loaded', { remaining, drift, cachedRemaining: parsed.remainingSeconds });
             setTimeElapsed(allowedTime - remaining);
             return { remaining, startedAt: parsed.startedAt || new Date(now).toISOString() };
           } else {
-            console.log('⏰ [TIMER] No cached state - initializing new timer');
-            // Initialize new timer
             const startedAt = new Date(now).toISOString();
             await AsyncStorage.setItem(timerKey, JSON.stringify({
               remainingSeconds: allowedTime,
@@ -945,76 +1154,55 @@ export default function DrawingTestScreen() {
             return { remaining: allowedTime, startedAt };
           }
         } catch (e) {
-          console.error('Timer cache init error:', e);
           const startedAt = new Date().toISOString();
           return { remaining: allowedTime, startedAt };
         }
       };
-
-      // Initialize timer state BEFORE starting interval
+      
       loadTimerState().then(({ remaining, startedAt }) => {
-        console.log('⏰ [TIMER] Timer state loaded, starting interval', { remaining, startedAt });
         remainingTimeRef.current = remaining;
         timerStartedAtRef.current = startedAt;
         setTimeElapsed(allowedTime - remaining);
         
-        // Only start interval after timer state is loaded
-        console.log('⏰ [TIMER] Creating interval...', { remaining, hasPerformSubmit: !!performSubmitRef.current });
-        
-        // If timer already expired, submit immediately
         if (remaining <= 0) {
-          console.log('⏰ [TIMER] Timer already expired - submitting immediately');
           timerInitializedRef.current = false;
           performSubmitRef.current?.();
           return;
         }
         
         countdownTimerRef.current = setInterval(async () => {
-          console.log('⏰ [TIMER] Tick', { remaining: remainingTimeRef.current });
           remainingTimeRef.current -= 1;
           setTimeElapsed(allowedTime - remainingTimeRef.current);
           
-          // Save timer state (preserve startedAt from initialization)
           try {
             await AsyncStorage.setItem(timerKey, JSON.stringify({
               remainingSeconds: remainingTimeRef.current,
               lastTickAt: new Date().toISOString(),
-              startedAt: timerStartedAtRef.current // Preserve original start time
+              startedAt: timerStartedAtRef.current
             }));
-          } catch (e) {
-            console.error('Timer save error:', e);
-          }
+          } catch (e) {}
           
-          // Auto-submit when time runs out - no popup, direct submission
           if (remainingTimeRef.current <= 0) {
-            console.log('⏰ [TIMER] Time expired - submitting', { hasPerformSubmit: !!performSubmitRef.current });
             if (countdownTimerRef.current) {
               clearInterval(countdownTimerRef.current);
               countdownTimerRef.current = null;
             }
-            timerInitializedRef.current = false; // Reset for retake
-            // Directly submit without any confirmation
+            timerInitializedRef.current = false;
             if (performSubmitRef.current) {
-              console.log('⏰ [TIMER] Calling performSubmit...');
               performSubmitRef.current();
-            } else {
-              console.error('⏰ [TIMER] performSubmitRef.current is null!');
             }
           }
         }, 1000);
       });
-
+      
       return () => {
         if (countdownTimerRef.current) {
           clearInterval(countdownTimerRef.current);
           countdownTimerRef.current = null;
         }
-        // Only reset timerInitializedRef if testId or studentId changes (new test)
-        // Don't reset on unmount to prevent re-initialization on re-render
       };
     }
-    // If no timer, don't start anything
-  }, [testData, questions.length, studentId, testId]);
+  }, [testData, questions.length, studentId, testId, inExamContext]);
 
   // Animation values
   const loadingOpacity = useSharedValue(0);
@@ -1080,7 +1268,7 @@ export default function DrawingTestScreen() {
         return parsed.root.children.map(extractTextFromNode).join('');
       }
     } catch (e) {
-      console.log('Failed to parse question_json:', e);
+      // Failed to parse question_json - fallback to raw content
     }
     return questionJson; // Fallback to raw content
   };
@@ -1092,11 +1280,26 @@ export default function DrawingTestScreen() {
 
   return (
     <View className={`flex-1 ${themeClasses.background}`}>
-      <TestHeader 
-        testName={testData.test_name || testData.title}
-      />
+      {showExamNav ? (
+        <ExamTestHeader
+          themeMode={themeMode}
+          examId={examId}
+          examName={examName || 'Exam'}
+          testName={testData?.test_name || testData?.title}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          timeSeconds={examTimeRemaining}
+          onBack={() => router.back()}
+        />
+      ) : (
+        <TestHeader 
+          testName={testData.test_name || testData.title}
+          onExit={() => router.back()}
+          showBackButton
+        />
+      )}
       {/* Progress Tracker */}
-      {testData?.allowed_time > 0 && (
+      {!inExamContext && testData?.allowed_time > 0 && (
         <View className="mx-4 mt-4">
           <ProgressTracker
             answeredCount={questions.length}
@@ -1108,11 +1311,7 @@ export default function DrawingTestScreen() {
       )}
       <ScrollView 
         className="flex-1"
-        scrollEnabled={!isDrawing && !isGestureActive}
-        onScrollBeginDrag={handleScrollBegin}
-        onScrollEndDrag={handleScrollEnd}
-        onMomentumScrollBegin={handleScrollBegin}
-        onMomentumScrollEnd={handleScrollEnd}
+        scrollEnabled={!showFullscreenCanvas}
       >
         <View className={`m-4 p-4 rounded-xl border shadow-sm ${
           themeMode === 'cyberpunk' 
@@ -1162,307 +1361,75 @@ export default function DrawingTestScreen() {
           </View>
 
           <View className="mb-4">
-            <Text className={`text-lg font-bold mb-4 ${
+            <Text className={`text-lg font-bold mb-2 ${
               themeMode === 'cyberpunk' 
                 ? 'text-cyan-400 tracking-wider' 
                 : themeMode === 'dark' 
                 ? 'text-white' 
                 : 'text-gray-800'
             }`}>
-              {themeMode === 'cyberpunk' ? 'DRAWING TOOLS' : 'Drawing Tools'}
+              {themeMode === 'cyberpunk' ? 'WORKSPACE' : 'Workspace'}
             </Text>
-            
-            {/* Drawing Tools */}
-            <View className={`flex-row flex-wrap gap-4 mb-4 p-3 rounded-lg border relative ${
-              themeMode === 'cyberpunk' 
-                ? 'bg-black border-cyan-400/30' 
-                : themeMode === 'dark' 
-                ? 'bg-gray-800 border-gray-600' 
-                : 'bg-gray-50 border-gray-200'
+            <Text className={`text-sm ${
+              themeMode === 'cyberpunk'
+                ? 'text-cyan-200'
+                : themeMode === 'dark'
+                ? 'text-gray-300'
+                : 'text-gray-600'
             }`}>
-              {/* Tool Selection */}
-              <View className="items-center min-w-20">
-                <Text className={`text-xs mb-1 font-medium ${
-                  themeMode === 'cyberpunk' 
-                    ? 'text-cyan-300 tracking-wider' 
-                    : themeMode === 'dark' 
-                    ? 'text-gray-300' 
-                    : 'text-gray-500'
-                }`}>
-                  {themeMode === 'cyberpunk' ? 'TOOL:' : 'Tool:'}
-                </Text>
-                <View className="flex-row gap-2">
-                  <TouchableOpacity
-                    className={`w-10 h-10 rounded-lg border-2 justify-center items-center ${
-                      themeMode === 'cyberpunk' 
-                        ? (currentTool === 'pencil' ? 'border-cyan-400 bg-red-400' : 'border-cyan-400/30') 
-                        : themeMode === 'dark' 
-                        ? (currentTool === 'pencil' ? 'border-blue-400 bg-blue-600' : 'border-gray-600 bg-gray-800')
-                        : (currentTool === 'pencil' ? 'border-header-blue bg-blue-50' : 'border-gray-300 bg-white')
-                    }`}
-                    style={themeMode === 'cyberpunk' && currentTool !== 'pencil' ? { backgroundColor: '#f8ef02' } : {}}
-                    onPress={() => setCurrentTool('pencil')}
-                  >
-                    <Image
-                      source={require('../../../../assets/images/canvas/pencil.png')}
-                      className="w-5 h-5"
-                    />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    className={`w-10 h-10 rounded-lg border-2 justify-center items-center ${
-                      themeMode === 'cyberpunk' 
-                        ? (currentTool === 'line' ? 'border-cyan-400 bg-red-400' : 'border-cyan-400/30') 
-                        : themeMode === 'dark' 
-                        ? (currentTool === 'line' ? 'border-blue-400 bg-blue-600' : 'border-gray-600 bg-gray-800')
-                        : (currentTool === 'line' ? 'border-header-blue bg-blue-50' : 'border-gray-300 bg-white')
-                    }`}
-                    style={themeMode === 'cyberpunk' && currentTool !== 'line' ? { backgroundColor: '#f8ef02' } : {}}
-                    onPress={() => setCurrentTool('line')}
-                  >
-                    <Image
-                      source={require('../../../../assets/images/canvas/ruler.png')}
-                      className="w-5 h-5"
-                    />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    className={`w-10 h-10 rounded-lg border-2 justify-center items-center ${
-                      themeMode === 'cyberpunk' 
-                        ? (currentTool === 'rectangle' ? 'border-cyan-400 bg-red-400' : 'border-cyan-400/30') 
-                        : themeMode === 'dark' 
-                        ? (currentTool === 'rectangle' ? 'border-blue-400 bg-blue-600' : 'border-gray-600 bg-gray-800')
-                        : (currentTool === 'rectangle' ? 'border-header-blue bg-blue-50' : 'border-gray-300 bg-white')
-                    }`}
-                    style={themeMode === 'cyberpunk' && currentTool !== 'rectangle' ? { backgroundColor: '#f8ef02' } : {}}
-                    onPress={() => setCurrentTool('rectangle')}
-                  >
-                    <Image
-                      source={require('../../../../assets/images/canvas/square.png')}
-                      className="w-5 h-5"
-                    />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    className={`w-10 h-10 rounded-lg border-2 justify-center items-center ${
-                      themeMode === 'cyberpunk' 
-                        ? (currentTool === 'circle' ? 'border-cyan-400 bg-red-400' : 'border-cyan-400/30') 
-                        : themeMode === 'dark' 
-                        ? (currentTool === 'circle' ? 'border-blue-400 bg-blue-600' : 'border-gray-600 bg-gray-800')
-                        : (currentTool === 'circle' ? 'border-header-blue bg-blue-50' : 'border-gray-300 bg-white')
-                    }`}
-                    style={themeMode === 'cyberpunk' && currentTool !== 'circle' ? { backgroundColor: '#f8ef02' } : {}}
-                    onPress={() => setCurrentTool('circle')}
-                  >
-                    <Image
-                      source={require('../../../../assets/images/canvas/circle.png')}
-                      className="w-5 h-5"
-                    />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    className={`w-10 h-10 rounded-lg border-2 justify-center items-center ${
-                      themeMode === 'cyberpunk' 
-                        ? (currentTool === 'eraser' ? 'border-cyan-400 bg-red-400' : 'border-cyan-400/30') 
-                        : themeMode === 'dark' 
-                        ? (currentTool === 'eraser' ? 'border-blue-400 bg-blue-600' : 'border-gray-600 bg-gray-800')
-                        : (currentTool === 'eraser' ? 'border-header-blue bg-blue-50' : 'border-gray-300 bg-white')
-                    }`}
-                    style={themeMode === 'cyberpunk' && currentTool !== 'eraser' ? { backgroundColor: '#f8ef02' } : {}}
-                    onPress={() => setCurrentTool('eraser')}
-                  >
-                    <Image
-                      source={require('../../../../assets/images/canvas/eraser.png')}
-                      className="w-5 h-5"
-                    />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    className={`w-10 h-10 rounded-lg border-2 justify-center items-center ${
-                      themeMode === 'cyberpunk' 
-                        ? (currentTool === 'text' ? 'border-cyan-400 bg-red-400' : 'border-cyan-400/30') 
-                        : themeMode === 'dark' 
-                        ? (currentTool === 'text' ? 'border-blue-400 bg-blue-600' : 'border-gray-600 bg-gray-800')
-                        : (currentTool === 'text' ? 'border-header-blue bg-blue-50' : 'border-gray-300 bg-white')
-                    }`}
-                    style={themeMode === 'cyberpunk' && currentTool !== 'text' ? { backgroundColor: '#f8ef02' } : {}}
-                    onPress={() => setCurrentTool('text')}
-                  >
-                    <Image
-                      source={require('../../../../assets/images/canvas/text-box.png')}
-                      className="w-5 h-5"
-                    />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    className={`w-10 h-10 rounded-lg border-2 justify-center items-center ${
-                      themeMode === 'cyberpunk' 
-                        ? (currentTool === 'pan' ? 'border-cyan-400 bg-red-400' : 'border-cyan-400/30') 
-                        : themeMode === 'dark' 
-                        ? (currentTool === 'pan' ? 'border-blue-400 bg-blue-600' : 'border-gray-600 bg-gray-800')
-                        : (currentTool === 'pan' ? 'border-header-blue bg-blue-50' : 'border-gray-300 bg-white')
-                    }`}
-                    style={themeMode === 'cyberpunk' && currentTool !== 'pan' ? { backgroundColor: '#f8ef02' } : {}}
-                    onPress={() => setCurrentTool('pan')}
-                  >
-                    <Image
-                      source={require('../../../../assets/images/canvas/pan.png')}
-                      className="w-5 h-5"
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Color Picker */}
-              <View className="items-center min-w-20">
-                <Text className={`text-xs mb-1 font-medium ${
-                  themeMode === 'cyberpunk' 
-                    ? 'text-cyan-300 tracking-wider' 
-                    : themeMode === 'dark' 
-                    ? 'text-gray-300' 
-                    : 'text-gray-500'
-                }`}>
-                  {themeMode === 'cyberpunk' ? 'COLOR:' : 'Color:'}
-                </Text>
-                <TouchableOpacity
-                  className={`flex-row items-center px-2 py-1 rounded-md border ${
-                    themeMode === 'cyberpunk' 
-                      ? 'border-cyan-400/30 bg-black' 
-                      : themeMode === 'dark' 
-                      ? 'border-gray-600 bg-gray-800' 
-                      : 'border-gray-300 bg-white'
-                  }`}
-                  onPress={() => setShowColorPicker(!showColorPicker)}
-                >
-                  <View className={`w-5 h-5 rounded border mr-1.5 ${
-                    themeMode === 'cyberpunk' 
-                      ? 'border-cyan-400/30' 
-                      : themeMode === 'dark' 
-                      ? 'border-gray-500' 
-                      : 'border-gray-300'
-                  }`} style={{ backgroundColor: currentColor }} />
-                  <Text className={`text-xs ${
-                    themeMode === 'cyberpunk' 
-                      ? 'text-cyan-300' 
-                      : themeMode === 'dark' 
-                      ? 'text-gray-300' 
-                      : 'text-gray-700'
-                  }`}>
-                    {themeMode === 'cyberpunk' ? 'COLOR' : 'Color'}
-                  </Text>
-                </TouchableOpacity>
-                
-                {showColorPicker && (
-                  <View className={`absolute top-0 left-full rounded-lg border p-2.5 flex-row flex-wrap w-44 z-50 -mt-28 ml-2 ${
-                    themeMode === 'cyberpunk' 
-                      ? 'bg-black border-cyan-400/30' 
-                      : themeMode === 'dark' 
-                      ? 'bg-gray-800 border-gray-600' 
-                      : 'bg-white border-gray-300'
-                  }`}>
-                    {colors.map(color => (
-                      <TouchableOpacity
-                        key={color}
-                        className={`w-8 h-8 rounded-md m-1.5 border ${
-                          currentColor === color ? 'border-2 border-gray-800' : 'border border-gray-200'
-                        }`}
-                        style={{ backgroundColor: color }}
-                        onPress={() => {
-                          setCurrentColor(color);
-                          setShowColorPicker(false);
-                        }}
-                      />
-                    ))}
-                  </View>
-                )}
-              </View>
-
-              {/* Thickness Slider (thin line + movable dot) */}
-              <View className="items-center">
-                <Text className={`text-xs mb-1 font-medium ${
-                  themeMode === 'cyberpunk' 
-                    ? 'text-cyan-300 tracking-wider' 
-                    : themeMode === 'dark' 
-                    ? 'text-gray-300' 
-                    : 'text-gray-500'
-                }`}>
-                  {themeMode === 'cyberpunk' ? `THICKNESS: ${currentThickness}px` : `Thickness: ${currentThickness}px`}
-                </Text>
-                <View
-                  className="w-48 h-6 rounded-xl bg-transparent relative overflow-hidden mt-2"
-                  onLayout={(e) => {
-                    (sliderWidthRef as any).current = e.nativeEvent.layout.width;
-                  }}
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onResponderGrant={(e) => {
-                    const width = (sliderWidthRef as any).current || 1;
-                    const x = e.nativeEvent.locationX;
-                    const pct = Math.max(0, Math.min(1, x / width));
-                    const value = Math.max(1, Math.round(1 + pct * (20 - 1)));
-                    setCurrentThickness(value);
-                  }}
-                  onResponderMove={(e) => {
-                    const width = (sliderWidthRef as any).current || 1;
-                    const x = e.nativeEvent.locationX;
-                    const pct = Math.max(0, Math.min(1, x / width));
-                    const value = Math.max(1, Math.round(1 + pct * (20 - 1)));
-                    setCurrentThickness(value);
-                  }}
-                >
-                  {(() => {
-                    const pct = Math.min(1, Math.max(0, (currentThickness - 1) / (20 - 1)));
-                    const trackWidth = (sliderWidthRef as any).current || 200;
-                    const thumbLeft = pct * trackWidth - 8; // center 16px thumb
-                    return (
-                      <>
-                        <View className={`absolute top-2.5 left-0 right-0 h-0.5 ${
-                          themeMode === 'cyberpunk' 
-                            ? 'bg-cyan-400/50' 
-                            : themeMode === 'dark' 
-                            ? 'bg-gray-500' 
-                            : 'bg-gray-400'
-                        }`} />
-                        <View className={`absolute top-1.5 w-4 h-4 rounded-full ${
-                          themeMode === 'cyberpunk' 
-                            ? 'bg-cyan-400' 
-                            : themeMode === 'dark' 
-                            ? 'bg-gray-300' 
-                            : 'bg-gray-800'
-                        }`} style={{ left: Math.max(-8, Math.min(trackWidth - 8, thumbLeft)) }} />
-                      </>
-                    );
-                  })()}
-                </View>
-              </View>
-            </View>
-
-            {/* Drawing Controls */}
-            {drawingControls && (
-              <DrawingControls
-                onUndo={drawingControls.undo}
-                onRedo={drawingControls.redo}
-                onReset={drawingControls.reset}
-                onZoomIn={drawingControls.zoomIn}
-                onZoomOut={drawingControls.zoomOut}
-                canUndo={drawingControls.canUndo}
-                canRedo={drawingControls.canRedo}
-                zoomLevel={drawingControls.zoomLevel}
-              />
-            )}
-
-            {/* Drawing Canvas - Force new instance for each question */}
-            <View className="mt-4 items-center">
-                <DrawingCanvas
-                  key={`canvas-${currentQuestionIndex}`}
-                  width={screenWidth - 64}
-                  height={300}
-                  currentColor={currentColor}
-                  currentThickness={currentThickness}
-                  currentTool={currentTool}
-                  onDrawingChange={handleDrawingChange}
-                  isDrawing={isDrawing}
-                  onDrawingStateChange={setIsDrawing}
-                  onGestureStateChange={handleGestureStateChange}
-                  initialPaths={currentQuestionPaths}
-                  onControlRef={setDrawingControls}
-                />
-            </View>
+              Tap the fullscreen button below to open the complete canvas with brushes, shapes, text, and pan/zoom. The preview updates automatically whenever you draw in fullscreen.
+            </Text>
           </View>
+
+          <View className="mt-6">
+              <Text className={`text-lg font-bold mb-3 ${
+                themeMode === 'cyberpunk'
+                  ? 'text-cyan-400 tracking-wider'
+                  : themeMode === 'dark'
+                  ? 'text-white'
+                  : 'text-gray-800'
+              }`}>
+                {themeMode === 'cyberpunk' ? 'CANVAS PREVIEW' : 'Canvas Preview'}
+              </Text>
+              <DrawingPreview
+                paths={currentQuestionPaths}
+                width={screenWidth - 64}
+                height={220}
+                themeMode={themeMode}
+              />
+              <TouchableOpacity
+                className={`mt-4 py-3.5 rounded-xl items-center ${
+                  themeMode === 'cyberpunk'
+                    ? 'border border-cyan-400'
+                    : themeMode === 'dark'
+                    ? 'bg-blue-600'
+                    : 'bg-header-blue'
+                }`}
+                style={themeMode === 'cyberpunk' ? { backgroundColor: '#f8ef02' } : {}}
+                onPress={handleOpenFullscreen}
+              >
+                <Text className={`text-base font-semibold ${
+                  themeMode === 'cyberpunk'
+                    ? 'text-black'
+                    : themeMode === 'dark'
+                    ? 'text-white'
+                    : 'text-white'
+                }`}>
+                  {themeMode === 'cyberpunk' ? 'OPEN FULL CANVAS' : 'Open Full Canvas'}
+                </Text>
+              </TouchableOpacity>
+              <Text className={`text-xs mt-2 text-center ${
+                themeMode === 'cyberpunk'
+                  ? 'text-cyan-300'
+                  : themeMode === 'dark'
+                  ? 'text-gray-300'
+                  : 'text-gray-500'
+              }`}>
+                {themeMode === 'cyberpunk'
+                  ? 'All drawing happens inside the fullscreen workspace.'
+                  : 'Open the full canvas to draw, pan, zoom, and manage layers.'}
+              </Text>
+            </View>
 
           {/* Question Navigation */}
           {questions.length > 1 && (
@@ -1531,39 +1498,41 @@ export default function DrawingTestScreen() {
             </View>
           )}
 
-          <View className="p-5 items-center">
-            {themeMode === 'cyberpunk' ? (
-              <TouchableOpacity 
-                onPress={handleSubmit}
-                disabled={isSubmitting}
-                style={{ alignSelf: 'center' }}
-              >
-                <Image 
-                  source={require('../../../../assets/images/save-cyberpunk.png')} 
-                  style={{ width: 40, height: 40 }}
-                  resizeMode="contain"
-                />
-              </TouchableOpacity>
-            ) : (
-              <Animated.View
-                style={{
-                  transform: [{ scale: isSubmitting ? 0.95 : 1 }],
-                }}
-              >
+          {!showExamNav && (
+            <View className="p-5 items-center">
+              {themeMode === 'cyberpunk' ? (
                 <TouchableOpacity 
-                  className={`py-3 px-4 rounded-lg self-center min-w-30 ${
-                    isSubmitting ? 'bg-gray-400' : 'bg-[#8B5CF6]'
-                  }`}
                   onPress={handleSubmit}
                   disabled={isSubmitting}
+                  style={{ alignSelf: 'center' }}
                 >
-                  <Text className="text-white text-lg font-bold text-center">
-                    {isSubmitting ? 'Submitting...' : 'Submit Drawing'}
-                  </Text>
+                  <Image 
+                    source={require('../../../../assets/images/save-cyberpunk.png')} 
+                    style={{ width: 40, height: 40 }}
+                    resizeMode="contain"
+                  />
                 </TouchableOpacity>
-              </Animated.View>
-            )}
-          </View>
+              ) : (
+                <Animated.View
+                  style={{
+                    transform: [{ scale: isSubmitting ? 0.95 : 1 }],
+                  }}
+                >
+                  <TouchableOpacity 
+                    className={`py-3 px-4 rounded-lg self-center min-w-30 ${
+                      isSubmitting ? 'bg-gray-400' : 'bg-[#8B5CF6]'
+                    }`}
+                    onPress={handleSubmit}
+                    disabled={isSubmitting}
+                  >
+                    <Text className="text-white text-lg font-bold text-center">
+                      {isSubmitting ? 'Submitting...' : 'Submit Drawing'}
+                    </Text>
+                  </TouchableOpacity>
+                </Animated.View>
+              )}
+            </View>
+          )}
 
           {submitError && (
             <View className="p-5 bg-red-50 m-5 rounded-lg border border-red-200">
@@ -1573,16 +1542,49 @@ export default function DrawingTestScreen() {
         </View>
       </ScrollView>
 
-      {/* Submit Modal */}
-      <SubmitModal
-        visible={showSubmitModal}
-        onCancel={() => setShowSubmitModal(false)}
-        onConfirm={performSubmit}
-        testName="Drawing Test"
-      />
+      {/* Exam navigation vs submit */}
+      {showExamNav ? (
+        <ExamNavFooter
+          themeMode={themeMode}
+          loading={navLoading}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          onPressPrev={navigatePrev}
+          onPressNext={navigateNext}
+          onPressReview={navigateReview}
+        />
+      ) : (
+        <SubmitModal
+          visible={showSubmitModal}
+          onCancel={() => setShowSubmitModal(false)}
+          onConfirm={performSubmit}
+          testName="Drawing Test"
+        />
+      )}
 
       {/* Loading Spinner Modal */}
       <LoadingModal visible={isSubmittingToAPI} message={themeMode === 'cyberpunk' ? 'SUBMITTING…' : 'Submitting…'} />
+
+      {/* Fullscreen Canvas Modal */}
+      <Modal
+        visible={showFullscreenCanvas}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => handleFullscreenExit()}
+      >
+        <View className="flex-1 bg-black">
+          <FullscreenCanvas
+            key={`fullscreen-canvas-${currentQuestionIndex}`}
+            initialLines={fullscreenInitialData.lines}
+            initialTextBoxes={fullscreenInitialData.textBoxes}
+            initialTool={fullscreenPrefs.tool}
+            initialColor={fullscreenPrefs.color}
+            initialThickness={fullscreenPrefs.thickness}
+            onChange={handleFullscreenChange}
+            onExit={handleFullscreenExit}
+          />
+        </View>
+      </Modal>
     </View>
   );
 }

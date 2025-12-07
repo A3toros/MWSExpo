@@ -1,6 +1,6 @@
 /** @jsxImportSource nativewind */
 import { useLocalSearchParams, router } from 'expo-router';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../../../../src/services/apiClient';
@@ -10,11 +10,17 @@ import SpeakingTestStudent from '../../../../src/components/test/SpeakingTestStu
 import { useTheme } from '../../../../src/contexts/ThemeContext';
 import { getThemeClasses } from '../../../../src/utils/themeUtils';
 import { markTestCompleted } from '../../../../src/utils/retestUtils';
+import ExamNavFooter from '../../../../src/components/ExamNavFooter';
+import ExamTestHeader from '../../../../src/components/ExamTestHeader';
+import { useExamTimer } from '../../../../src/hooks/useExamTimer';
+import { useExamNavigation } from '../../../../src/hooks/useExamNavigation';
 
 export default function SpeakingTestScreen() {
   const { themeMode } = useTheme();
   const themeClasses = getThemeClasses(themeMode);
-  const { testId } = useLocalSearchParams<{ testId: string }>();
+  const { testId, exam, examId } = useLocalSearchParams<{ testId: string; exam?: string; examId?: string }>();
+  const inExamContext = useMemo(() => exam === '1' && !!examId, [exam, examId]);
+  const showExamNav = inExamContext && !!examId;
   const user = useAppSelector((state) => state.auth.user);
   const [studentId, setStudentId] = useState<string | number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -25,6 +31,49 @@ export default function SpeakingTestScreen() {
   const [selectedQuestion, setSelectedQuestion] = useState<any>(null);
   const [testResults, setTestResults] = useState<any>(null);
   const [showResults, setShowResults] = useState(false);
+  const [cachedExamSpeaking, setCachedExamSpeaking] = useState<any>(null);
+
+  const {
+    loading: navLoading,
+    currentIndex: examTestIndex,
+    total: examTestsTotal,
+    navigatePrev,
+    navigateNext,
+    navigateReview,
+    examName,
+    totalMinutes,
+    cachedAnswers,
+  } = useExamNavigation({
+    examId,
+    currentTestId: testId,
+    currentTestType: 'speaking',
+    enabled: showExamNav,
+    studentId: user?.student_id || studentId,
+  });
+  const examTimeRemaining = useExamTimer({ examId, studentId: user?.student_id || studentId, totalMinutes });
+
+  // Prefill speaking state from cached exam data
+  useEffect(() => {
+    if (!showExamNav || !(user?.student_id || studentId) || !examId || !testId) return;
+    const sid = user?.student_id || studentId;
+    const key = `exam_answer_${sid}_${examId}_${testId}_speaking`;
+    const preloaded = cachedAnswers?.[key];
+    if (preloaded) {
+      setCachedExamSpeaking(preloaded);
+      return;
+    }
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          setCachedExamSpeaking(parsed);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [showExamNav, user?.student_id, studentId, examId, testId, cachedAnswers]);
 
   // Helper function to decode JWT token and extract student ID
   const getStudentIdFromToken = async (): Promise<string | number | null> => {
@@ -297,6 +346,18 @@ export default function SpeakingTestScreen() {
     }
   }, [user?.student_id, testId]);
 
+  // Persist answers/results into exam-level key when in exam context
+  useEffect(() => {
+    if (!inExamContext || !studentId || !examId || !testId) return;
+    if (!testResults && !selectedQuestion) return;
+    const payload = {
+      selectedQuestionId: selectedQuestion?.id,
+      results: testResults || null,
+    };
+    const key = `exam_answer_${studentId}_${examId}_${testId}_speaking`;
+    AsyncStorage.setItem(key, JSON.stringify(payload)).catch(() => {});
+  }, [examId, inExamContext, selectedQuestion?.id, studentId, testId, testResults]);
+
   const handleAnswerChange = useCallback((questionId: string, answer: any) => {
     // Handle answer updates if needed
     console.log('Answer changed:', questionId, answer);
@@ -390,6 +451,25 @@ export default function SpeakingTestScreen() {
 
   return (
     <View className={`flex-1 ${themeClasses.background}`}>
+      {showExamNav ? (
+        <ExamTestHeader
+          themeMode={themeMode}
+          examId={examId}
+          examName={examName || 'Exam'}
+          testName={testData?.test_name}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          timeSeconds={examTimeRemaining}
+          onBack={() => router.back()}
+        />
+      ) : null}
+      {!showExamNav ? (
+        <TestHeader
+          testName={testData?.test_name}
+          onExit={() => router.back()}
+          showBackButton
+        />
+      ) : null}
       <SpeakingTestProvider>
         <SpeakingTestStudent
           testId={testId}
@@ -400,8 +480,21 @@ export default function SpeakingTestScreen() {
           studentId={String(user?.student_id || studentId)}
           showCorrectAnswers={false}
           themeMode={themeMode}
+          antiCheatingEnabled={!inExamContext}
+          initialTranscript={cachedExamSpeaking?.results?.transcript || cachedExamSpeaking?.transcript || null}
         />
       </SpeakingTestProvider>
+      {showExamNav ? (
+        <ExamNavFooter
+          themeMode={themeMode}
+          loading={navLoading}
+          currentIndex={examTestIndex}
+          total={examTestsTotal}
+          onPressPrev={navigatePrev}
+          onPressNext={navigateNext}
+          onPressReview={navigateReview}
+        />
+      ) : null}
     </View>
   );
 }
